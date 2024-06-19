@@ -46,24 +46,27 @@ func exclude(orig, exclude map[rune]struct{}) {
 }
 
 func BenchmarkIsInSetFunc(b *testing.B) {
+	// Run with:
+	//	time go test -count=10 -timeout=30m -run=- -bench=BenchmarkIsInSetFunc
+
 	// control which benchmarks to run
 
 	const (
-		executeStdlib          = false
+		executeStdlib          = true
 		executeSmallOnes       = false
 		executeIsInString      = false
 		executeIsInTable       = false
 		executeIsInSlice       = false
 		executeIsInMap         = false
 		executeIsInMask64      = false
-		executeIsInMaskSlice32 = true
-		executeIsInMaskSlice64 = true
+		executeIsInMaskSlice32 = false
+		executeIsInMaskSlice64 = false
 		executeIsInSparseSet   = false
-		executeIsInStrategy    = false
+		executeIsInStrategy    = true
 	)
 
 	const (
-		benchInit    = false
+		benchInit    = false // only if this is true it makes sense to use -benchmem
 		benchRuntime = true
 	)
 
@@ -327,7 +330,7 @@ func BenchmarkUnicodeIs(b *testing.B) {
 	generateUnicodeIsFuncsMap()
 
 	// Run with:
-	//	time go test -count=10 -benchmem -timeout=30m -bench=BenchmarkUnicodeIs -run=-
+	//	time go test -count=10 -timeout=30m -run=- -bench=BenchmarkUnicodeIs
 
 	benchFunc := func(b *testing.B, name string, s []rune, f func(rune) bool) {
 		b.Run(name, func(b *testing.B) {
