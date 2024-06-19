@@ -50,7 +50,6 @@ var (
 		"IsSymbol":  {f: unicode.IsSymbol},
 		"IsTitle":   {f: unicode.IsTitle},
 		"IsUpper":   {f: unicode.IsUpper},
-		"ValidRune": {f: utf8.ValidRune},
 	}
 )
 
@@ -85,6 +84,10 @@ func generateUnicodeIsFuncsMap() {
 		}
 
 		unicodeIsFuncsMap["nothing"] = &isFuncTestCase{f: isNeverIn}
+		unicodeIsFuncsMap["ValidRune"] = &isFuncTestCase{
+			f:     utf8.ValidRune,
+			runes: validUTF8,
+		}
 	})
 }
 
