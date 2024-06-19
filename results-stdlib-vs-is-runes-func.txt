@@ -1,0 +1,103 @@
+goos: linux
+goarch: amd64
+pkg: github.com/diegommm/runes
+cpu: 11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz
+                                   │ results-stdlib.tx │      results-is-runes-func.txt       │
+                                   │      sec/op       │    sec/op     vs base                │
+UnicodeIs/IsSpace/matching_only            99.49n ± 2%    45.39n ± 3%  -54.38% (p=0.000 n=10)
+UnicodeIs/IsSpace/all_valid_UTF8           3.265m ± 3%    1.640m ± 3%  -49.78% (p=0.000 n=10)
+UnicodeIs/IsTitle/matching_only           170.45n ± 4%    55.59n ± 3%  -67.38% (p=0.000 n=10)
+UnicodeIs/IsTitle/all_valid_UTF8           3.164m ± 4%    1.646m ± 4%  -47.99% (p=0.000 n=10)
+UnicodeIs/IsMark/matching_only            20.243µ ± 3%    4.377µ ± 6%  -78.38% (p=0.000 n=10)
+UnicodeIs/IsMark/all_valid_UTF8            9.201m ± 3%    1.976m ± 4%  -78.52% (p=0.000 n=10)
+UnicodeIs/IsNumber/matching_only          13.651µ ± 3%    3.342µ ± 3%  -75.52% (p=0.000 n=10)
+UnicodeIs/IsNumber/all_valid_UTF8          8.647m ± 3%    1.671m ± 4%  -80.68% (p=0.000 n=10)
+UnicodeIs/IsLetter/matching_only          1120.7µ ± 2%    244.9µ ± 5%  -78.15% (p=0.000 n=10)
+UnicodeIs/IsLetter/all_valid_UTF8         10.126m ± 4%    1.700m ± 3%  -83.21% (p=0.000 n=10)
+UnicodeIs/IsDigit/matching_only            4.502µ ± 2%    1.264µ ± 5%  -71.91% (p=0.000 n=10)
+UnicodeIs/IsDigit/all_valid_UTF8           7.051m ± 2%    1.726m ± 3%  -75.53% (p=0.000 n=10)
+UnicodeIs/IsGraphic/matching_only         1691.4µ ± 3%    275.0µ ± 2%  -83.74% (p=0.000 n=10)
+UnicodeIs/IsGraphic/all_valid_UTF8        38.868m ± 5%    1.957m ± 2%  -94.97% (p=0.000 n=10)
+UnicodeIs/IsLower/matching_only           17.224µ ± 3%    4.051µ ± 3%  -76.48% (p=0.000 n=10)
+UnicodeIs/IsLower/all_valid_UTF8           7.750m ± 4%    1.713m ± 3%  -77.90% (p=0.000 n=10)
+UnicodeIs/IsPrint/matching_only           1699.4µ ± 2%    268.5µ ± 2%  -84.20% (p=0.000 n=10)
+UnicodeIs/IsPrint/all_valid_UTF8          37.931m ± 2%    2.032m ± 4%  -94.64% (p=0.000 n=10)
+UnicodeIs/IsSymbol/matching_only           56.19µ ± 2%    14.21µ ± 3%  -74.70% (p=0.000 n=10)
+UnicodeIs/IsSymbol/all_valid_UTF8          8.489m ± 4%    1.703m ± 5%  -79.94% (p=0.000 n=10)
+UnicodeIs/IsUpper/matching_only           13.806µ ± 3%    3.240µ ± 2%  -76.54% (p=0.000 n=10)
+UnicodeIs/IsUpper/all_valid_UTF8           7.785m ± 2%    1.709m ± 3%  -78.05% (p=0.000 n=10)
+UnicodeIs/IsControl/matching_only          73.53n ± 3%   121.90n ± 3%  +65.78% (p=0.000 n=10)
+UnicodeIs/IsControl/all_valid_UTF8         1.431m ± 2%    1.650m ± 3%  +15.29% (p=0.000 n=10)
+UnicodeIs/IsPunct/matching_only            6.460µ ± 3%    1.508µ ± 3%  -76.66% (p=0.000 n=10)
+UnicodeIs/IsPunct/all_valid_UTF8           7.850m ± 4%    1.719m ± 3%  -78.11% (p=0.000 n=10)
+UnicodeIs/ValidRune/matching_only          1.208m ± 3%    1.971m ± 2%  +63.14% (p=0.000 n=10)
+UnicodeIs/ValidRune/all_valid_UTF8         1.221m ± 4%    1.989m ± 4%  +62.91% (p=0.000 n=10)
+geomean                                    357.8µ         101.8µ       -71.53%
+
+                                   │ results-stdlib.tx │      results-is-runes-func.txt      │
+                                   │       B/op        │    B/op     vs base                 │
+UnicodeIs/IsSpace/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSpace/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsTitle/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsTitle/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsMark/matching_only            0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsMark/all_valid_UTF8           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsNumber/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsNumber/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLetter/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLetter/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsDigit/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsDigit/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsGraphic/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsGraphic/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLower/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLower/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPrint/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPrint/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSymbol/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSymbol/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsUpper/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsUpper/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsControl/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsControl/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPunct/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPunct/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/ValidRune/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/ValidRune/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                              ²               +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                                   │ results-stdlib.tx │      results-is-runes-func.txt      │
+                                   │     allocs/op     │ allocs/op   vs base                 │
+UnicodeIs/IsSpace/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSpace/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsTitle/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsTitle/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsMark/matching_only            0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsMark/all_valid_UTF8           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsNumber/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsNumber/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLetter/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLetter/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsDigit/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsDigit/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsGraphic/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsGraphic/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLower/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsLower/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPrint/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPrint/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSymbol/matching_only          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsSymbol/all_valid_UTF8         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsUpper/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsUpper/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsControl/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsControl/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPunct/matching_only           0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/IsPunct/all_valid_UTF8          0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/ValidRune/matching_only         0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+UnicodeIs/ValidRune/all_valid_UTF8        0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                              ²               +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean

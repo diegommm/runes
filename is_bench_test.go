@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode"
 )
-
-type isInFunc = func(rune) bool
 
 func makeContiguousRunesString(start, count rune) string {
 	var b strings.Builder
@@ -18,26 +17,26 @@ func makeContiguousRunesString(start, count rune) string {
 	return b.String()
 }
 
-// isInMaskSlice32Wrapper is a wrapper for fair comparison.
-func isInMaskSlice32Wrapper(s []rune) isInFunc {
+// isMaskSlice32Wrapper is a wrapper for fair comparison.
+func isMaskSlice32Wrapper(s []rune) func(rune) bool {
 	minRune, span := minAndSpan(s)
-	return isInMaskSlice32(s, minRune, span)
+	return isMaskSlice32(s, minRune, span)
 }
 
-// isInMaskSlice64Wrapper is a wrapper for fair comparison.
-func isInMaskSlice64Wrapper(s []rune) isInFunc {
+// isMaskSlice64Wrapper is a wrapper for fair comparison.
+func isMaskSlice64Wrapper(s []rune) func(rune) bool {
 	minRune, span := minAndSpan(s)
-	return isInMaskSlice64(s, minRune, span)
+	return isMaskSlice64(s, minRune, span)
 }
 
-// isInMask64Wrapper is a wrapper for fair comparison.
-func isInMask64Wrapper(s []rune) isInFunc {
+// isMask64Wrapper is a wrapper for fair comparison.
+func isMask64Wrapper(s []rune) func(rune) bool {
 	minRune, span := minAndSpan(s)
 	if span >= 64 {
 		return nil
 	}
 
-	return isInMask64(s, minRune)
+	return isMask64(s, minRune)
 }
 
 func exclude(orig, exclude map[rune]struct{}) {
@@ -129,7 +128,7 @@ func BenchmarkIsInSetFunc(b *testing.B) {
 
 	// init benchmarking helpers (overhead negligible)
 
-	benchInitFunc := func(b *testing.B, cond bool, name string, f func() isInFunc) {
+	benchInitFunc := func(b *testing.B, cond bool, name string, f func() func(rune) bool) {
 		if !cond {
 			return
 		}
@@ -141,25 +140,25 @@ func BenchmarkIsInSetFunc(b *testing.B) {
 			}
 		})
 	}
-	benchInitString := func(b *testing.B, cond bool, name string, s string, f func(string) isInFunc) {
-		benchInitFunc(b, cond, name, func() isInFunc {
+	benchInitString := func(b *testing.B, cond bool, name string, s string, f func(string) func(rune) bool) {
+		benchInitFunc(b, cond, name, func() func(rune) bool {
 			return f(s)
 		})
 	}
-	benchInitMap := func(b *testing.B, cond bool, name string, s map[rune]struct{}, f func(map[rune]struct{}) isInFunc) {
-		benchInitFunc(b, cond, name, func() isInFunc {
+	benchInitMap := func(b *testing.B, cond bool, name string, s map[rune]struct{}, f func(map[rune]struct{}) func(rune) bool) {
+		benchInitFunc(b, cond, name, func() func(rune) bool {
 			return f(s)
 		})
 	}
-	benchInitSlice := func(b *testing.B, cond bool, name string, s []rune, f func([]rune) isInFunc) {
-		benchInitFunc(b, cond, name, func() isInFunc {
+	benchInitSlice := func(b *testing.B, cond bool, name string, s []rune, f func([]rune) func(rune) bool) {
+		benchInitFunc(b, cond, name, func() func(rune) bool {
 			return f(s)
 		})
 	}
 
 	// runtime benchmarking helpers (overhead negligible)
 
-	benchRuntimeFunc := func(b *testing.B, cond bool, name string, f isInFunc) {
+	benchRuntimeFunc := func(b *testing.B, cond bool, name string, f func(rune) bool) {
 		if !cond {
 			return
 		}
@@ -188,15 +187,15 @@ func BenchmarkIsInSetFunc(b *testing.B) {
 		// implementations in this package
 
 		var (
-			isInStringFunc      = IsInString(str)
-			isInTableFunc       = IsInTable(sl)
-			isInSliceFunc       = isInSlice(sl)
-			isInMapFunc         = isInMap(m)
-			isInMask64Func      = isInMask64Wrapper(sl)
-			isInMaskSlice32Func = isInMaskSlice32Wrapper(sl)
-			isInMaskSlice64Func = isInMaskSlice64Wrapper(sl)
-			isInSparseSetFunc   = IsInSparseSet(sl)
-			isInStrategyFunc    = isInStrategy(sl)
+			isStringFunc      = isString(str)
+			isTableFunc       = isTable(sl)
+			isSliceFunc       = isSlice(sl)
+			isMapFunc         = isMap(m)
+			isMask64Func      = isMask64Wrapper(sl)
+			isMaskSlice32Func = isMaskSlice32Wrapper(sl)
+			isMaskSlice64Func = isMaskSlice64Wrapper(sl)
+			isSparseSetFunc   = isSparseSet(sl)
+			isStrategyFunc    = isStrategy(sl)
 		)
 
 		b.Run(fmt.Sprintf("[len=%d min=%v span=%v init] %s", len(sl), minRune, span, bc.name), func(b *testing.B) {
@@ -204,15 +203,15 @@ func BenchmarkIsInSetFunc(b *testing.B) {
 				b.SkipNow()
 			}
 
-			benchInitString(b, executeIsInString, "IsInString", str, IsInString)
-			benchInitSlice(b, executeIsInTable, "IsInTable", sl, IsInTable)
-			benchInitSlice(b, executeIsInSlice, "isInSlice", sl, isInSlice)
-			benchInitMap(b, executeIsInMap, "isInMap", m, isInMap)
-			benchInitSlice(b, executeIsInMask64 && isInMask64Func != nil, "isInMask64", sl, isInMask64Wrapper)
-			benchInitSlice(b, executeIsInMaskSlice32, "isInMaskSlice32", sl, isInMaskSlice32Wrapper)
-			benchInitSlice(b, executeIsInMaskSlice64, "isInMaskSlice64", sl, isInMaskSlice64Wrapper)
-			benchInitSlice(b, executeIsInSparseSet, "IsInSparseSet", sl, IsInSparseSet)
-			benchInitSlice(b, executeIsInStrategy, "isInStrategy", sl, isInStrategy)
+			benchInitString(b, executeIsInString, "isString", str, isString)
+			benchInitSlice(b, executeIsInTable, "isTable", sl, isTable)
+			benchInitSlice(b, executeIsInSlice, "isSlice", sl, isSlice)
+			benchInitMap(b, executeIsInMap, "isMap", m, isMap)
+			benchInitSlice(b, executeIsInMask64 && isMask64Func != nil, "isMask64", sl, isMask64Wrapper)
+			benchInitSlice(b, executeIsInMaskSlice32, "isMaskSlice32", sl, isMaskSlice32Wrapper)
+			benchInitSlice(b, executeIsInMaskSlice64, "isMaskSlice64", sl, isMaskSlice64Wrapper)
+			benchInitSlice(b, executeIsInSparseSet, "isSparseSet", sl, isSparseSet)
+			benchInitSlice(b, executeIsInStrategy, "isStrategy", sl, isStrategy)
 		})
 
 		b.Run(fmt.Sprintf("[len=%d min=%v span=%v runtime] %s", len(sl), minRune, span, bc.name), func(b *testing.B) {
@@ -272,15 +271,15 @@ func BenchmarkIsInSetFunc(b *testing.B) {
 				})
 			}
 
-			benchRuntimeFunc(b, executeIsInString, "IsInString", isInStringFunc)
-			benchRuntimeFunc(b, executeIsInTable, "IsInTable", isInTableFunc)
-			benchRuntimeFunc(b, executeIsInSlice, "isInSlice", isInSliceFunc)
-			benchRuntimeFunc(b, executeIsInMap, "isInMap", isInMapFunc)
-			benchRuntimeFunc(b, executeIsInMask64 && isInMask64Func != nil, "isInMask64", isInMask64Func)
-			benchRuntimeFunc(b, executeIsInMaskSlice32, "isInMaskSlice32", isInMaskSlice32Func)
-			benchRuntimeFunc(b, executeIsInMaskSlice64, "isInMaskSlice64", isInMaskSlice64Func)
-			benchRuntimeFunc(b, executeIsInSparseSet, "IsInSparseSet", isInSparseSetFunc)
-			benchRuntimeFunc(b, executeIsInStrategy, "isInStrategy", isInStrategyFunc)
+			benchRuntimeFunc(b, executeIsInString, "isString", isStringFunc)
+			benchRuntimeFunc(b, executeIsInTable, "isTable", isTableFunc)
+			benchRuntimeFunc(b, executeIsInSlice, "isSlice", isSliceFunc)
+			benchRuntimeFunc(b, executeIsInMap, "isMap", isMapFunc)
+			benchRuntimeFunc(b, executeIsInMask64 && isMask64Func != nil, "isMask64", isMask64Func)
+			benchRuntimeFunc(b, executeIsInMaskSlice32, "isMaskSlice32", isMaskSlice32Func)
+			benchRuntimeFunc(b, executeIsInMaskSlice64, "isMaskSlice64", isMaskSlice64Func)
+			benchRuntimeFunc(b, executeIsInSparseSet, "isSparseSet", isSparseSetFunc)
+			benchRuntimeFunc(b, executeIsInStrategy, "isStrategy", isStrategyFunc)
 		})
 	}
 }
@@ -323,3 +322,38 @@ const rawTestData = `
 是高级的非過程化編程語言，它允许用户在高层数据结构上工作。它不要求用户指定对数据的存放方法，也不需要用户了解其具体的数据存放方式。而它的界面，能使具有底层结构完全不同的数据库系统和不同数据库之间，使用相同的作为数据的输入与管理。它以记录项目〔〕的合集（）〔项集，〕作为操纵对象，所有语句接受项集作为输入，回送出的项集作为输出，这种项集特性允许一条语句的输出作为另一条语句的输入，所以语句可以嵌套，这使它拥有极大的灵活性和强大的功能。在多数情况下，在其他編程語言中需要用一大段程序才可实践的一个单独事件，而其在上只需要一个语句就可以被表达出来。这也意味着用可以写出非常复杂的语句，在不特�考慮效能下。
 同時也是数据库文件格式的扩展名。
 `
+
+func BenchmarkUnicodeIs(b *testing.B) {
+	generateUnicodeIsFuncsMap()
+
+	// Run with:
+	//	time go test -count=10 -benchmem -timeout=30m -bench=BenchmarkUnicodeIs -run=-
+
+	benchFunc := func(b *testing.B, name string, s []rune, f func(rune) bool) {
+		b.Run(name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				for _, r := range s {
+					f(r)
+				}
+			}
+		})
+	}
+
+	for name, bench := range unicodeIsFuncsMap {
+		if unicode.IsLower(rune(name[0])) {
+			continue // skip dumb funcs
+		}
+
+		b.Run(name, func(b *testing.B) {
+			f := IsRunesFunc(bench.runes)
+			b.Run("matching only", func(b *testing.B) {
+				benchFunc(b, "stdlib", bench.runes, bench.f)
+				benchFunc(b, "IsRunesFunc", bench.runes, f)
+			})
+			b.Run("all valid UTF8", func(b *testing.B) {
+				benchFunc(b, "stdlib", validUTF8, bench.f)
+				benchFunc(b, "IsRunesFunc", validUTF8, f)
+			})
+		})
+	}
+}
