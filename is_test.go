@@ -1,40 +1,102 @@
 package runes
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"unicode"
 	"unicode/utf8"
 )
 
+var isInSetImplems = map[string]*struct {
+	isInSetMaker func(string) func(rune) bool
+	cond         func(start, span rune, count int) bool // optional, true if nil
+}{
+	"isStrategy": {
+		isInSetMaker: func(s string) func(rune) bool {
+			return isStrategy(strings.NewReader(s))
+		},
+	},
+	"isSlice": {
+		isInSetMaker: func(s string) func(rune) bool {
+			return isSlice([]rune(s))
+		},
+	},
+	"isMap": {
+		isInSetMaker: func(s string) func(rune) bool {
+			return isMap(stringToRuneMap(s))
+		},
+	},
+	"isMask64": {
+		isInSetMaker: func(s string) func(rune) bool {
+			rr := strings.NewReader(s)
+			minRune, _, _ := startSpanCount(rr)
+			rewindRuneReader(rr)
+			return isMask64(rr, minRune)
+		},
+		cond: func(start, span rune, count int) bool {
+			return span < 64
+		},
+	},
+	"isMask32": {
+		isInSetMaker: func(s string) func(rune) bool {
+			rr := strings.NewReader(s)
+			minRune, _, _ := startSpanCount(rr)
+			rewindRuneReader(rr)
+			return isMask32(rr, minRune)
+		},
+		cond: func(start, span rune, count int) bool {
+			return span < 32
+		},
+	},
+	"isMaskSlice32": {
+		isInSetMaker: func(s string) func(rune) bool {
+			rr := strings.NewReader(s)
+			minRune, span, _ := startSpanCount(rr)
+			rewindRuneReader(rr)
+			return isMaskSlice32(rr, minRune, span)
+		},
+	},
+	"isMaskSlice64": {
+		isInSetMaker: func(s string) func(rune) bool {
+			rr := strings.NewReader(s)
+			minRune, span, _ := startSpanCount(rr)
+			rewindRuneReader(rr)
+			return isMaskSlice64(rr, minRune, span)
+		},
+	},
+	"isSparseSet": {
+		isInSetMaker: func(s string) func(rune) bool {
+			return isSparseSet([]rune(s))
+		},
+	},
+}
+
 type isFuncTestCase struct {
 	f     func(rune) bool
 	runes []rune
 }
 
-type isFuncTested struct {
-	name string
-	f    func(rune) bool
-}
-
 var (
 	unicodeIsFuncsDataOnce sync.Once
-	validUTF8              []rune
-	invalidUTF8            []rune
 	unicodeIsFuncsMap      = map[string]*isFuncTestCase{
-		// Keep the map key of dumb funcs starting with lowercase
-		"tiny": {f: func(r rune) bool {
-			return r < 32
-		}},
-		"byte": {f: func(r rune) bool {
-			return r < utf8.RuneSelf
-		}},
-
-		// make sure to set a big timeout
-		"limits32": {f: func(r rune) bool {
-			m := r % 32
-			return m == 0 || m == 31
-		}},
+		// Keep the map key of non-stdlib funcs starting with lowercase
+		"nothing": {
+			f:     isNeverIn,
+			runes: []rune{},
+		},
+		"tiny": {
+			f: func(r rune) bool {
+				return r >= 0 && r < 32
+			},
+			runes: validRuneSlice(0, 32),
+		},
+		"ascii": {
+			f: func(r rune) bool {
+				return r >= 0 && r < utf8.RuneSelf
+			},
+			runes: validRuneSlice(0, utf8.RuneSelf),
+		},
 
 		// Keep the map key of stdlib funcs starting with uppercase
 		"IsControl": {f: unicode.IsControl},
@@ -57,87 +119,55 @@ func generateUnicodeIsFuncsMap() {
 	// brute, very brute indeed, but too lazy to do the fine work of getting
 	// every rune analyzing the code
 	unicodeIsFuncsDataOnce.Do(func() {
-		validUTF8 = make([]rune, 0, utf8.MaxRune)
-		for r := rune(0); r < utf8.MaxRune; r++ {
-			if utf8.ValidRune(r) {
-				validUTF8 = append(validUTF8, r)
-			} else {
-				invalidUTF8 = append(validUTF8, r)
-			}
-		}
-
 		var wg sync.WaitGroup
 		defer wg.Wait()
+
 		for _, x := range unicodeIsFuncsMap {
-			if len(x.runes) != 0 {
-				panic("use generateUnicodeIsFuncsMap instead")
+			if x.runes != nil {
+				continue
 			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for _, r := range validUTF8 {
-					if x.f(r) {
-						x.runes = append(x.runes, r)
+				for i := newValidRuneIterator(); i.Next(); {
+					if x.f(i.Rune) {
+						x.runes = append(x.runes, i.Rune)
 					}
 				}
 			}()
-		}
-
-		unicodeIsFuncsMap["nothing"] = &isFuncTestCase{f: isNeverIn}
-		unicodeIsFuncsMap["ValidRune"] = &isFuncTestCase{
-			f:     utf8.ValidRune,
-			runes: validUTF8,
 		}
 	})
 }
 
 func TestIsFuncsUnicode(t *testing.T) {
 	t.Parallel()
-
 	generateUnicodeIsFuncsMap()
 
-	buildFuncTestCases := func(s []rune) []isFuncTested {
-		duped := append(s, s...)
-		m := runeSliceToMap(s)
-		str := string(s)
-		b := []byte(str)
-		minRune, span := minAndSpan(s)
-
-		ret := []isFuncTested{
-			{"IsStringFunc", IsStringFunc(str)},
-			{"IsBytesFunc", IsBytesFunc(b)},
-			{"IsRunesFunc", IsRunesFunc(duped)},
-			{"isStrategy", isStrategy(s)},
-			{"isMaskSlice64", isMaskSlice64(s, minRune, span)},
-			{"isMaskSlice32", isMaskSlice32(s, minRune, span)},
-			{"isMap", isMap(m)},
-			{"isSlice", isSlice(s)},
-			{"isSparseSet", isSparseSet(s)},
-			{"isTable", isTable(s)},
-			{"isString", isString(str)},
-		}
-
-		if span < 64 {
-			ret = append(ret, isFuncTested{"isMask64", isMask64(s, minRune)})
-		}
-
-		if span < 32 {
-			ret = append(ret, isFuncTested{"isMask32", isMask32(s, minRune)})
-		}
-
-		return ret
-	}
-
 	for name, isFunc := range unicodeIsFuncsMap {
-		t.Run(name, func(t *testing.T) {
+		t.Run("case="+name, func(t *testing.T) {
 			t.Parallel()
 
-			for _, tc := range buildFuncTestCases(isFunc.runes) {
-				t.Run(tc.name, func(t *testing.T) {
+			minRune, span, count := startSpanCount(newRuneReadSeeker(isFunc.runes))
+			str := string(isFunc.runes)
+
+			for name, implem := range isInSetImplems {
+				if implem.cond != nil && !implem.cond(minRune, span, count) {
+					continue
+				}
+
+				t.Run("implem="+name, func(t *testing.T) {
 					t.Parallel()
-					for _, r := range validUTF8 {
-						if tc.f(r) != isFunc.f(r) {
-							t.Fatalf("failed for rune %v", r)
+
+					isInSetFunc := implem.isInSetMaker(str)
+					for _, r := range isFunc.runes {
+						if !isInSetFunc(r) {
+							t.Fatalf("unexpected false for rune %v", r)
+						}
+					}
+
+					for _, c := range runeCases {
+						if isInSetFunc(c.r) != isFunc.f(c.r) {
+							t.Fatalf("differs from cannonical in rune %v", c.r)
 						}
 					}
 				})

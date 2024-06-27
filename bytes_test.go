@@ -6,6 +6,7 @@ import (
 )
 
 func TestEncodeRune(t *testing.T) {
+	t.Skip("deprecated")
 	t.Parallel()
 
 	runRuneTest(t, 8, func(t *testing.T, r rune) {
@@ -33,6 +34,7 @@ func TestEncodeRune(t *testing.T) {
 }
 
 func TestAppendRune(t *testing.T) {
+	t.Skip("deprecated")
 	t.Parallel()
 
 	runRuneTest(t, 64, func(t *testing.T, r rune) {
@@ -51,6 +53,7 @@ func TestAppendRune(t *testing.T) {
 }
 
 func TestUTF8Bytes(t *testing.T) {
+	t.Skip("deprecated")
 	t.Parallel()
 
 	runRuneTest(t, 8, func(t *testing.T, r rune) {

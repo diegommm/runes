@@ -1,8 +1,6 @@
 package runes
 
 const (
-	maxRune = '\U0010FFFF' // 0x10ffff 1114111
-
 	rune1Max = 1<<7 - 1  // 127
 	rune2Max = 1<<11 - 1 // 2047
 	rune3Max = 1<<16 - 1 // 65535
@@ -18,7 +16,3 @@ const (
 	surrogateMaskUint32 = ^uint32(0x800 - 1)
 	surrogateMaskRune   = ^rune(0x800 - 1)
 )
-
-func ValidRune(r rune) bool {
-	return uint32(r) <= maxRune && r&surrogateMaskRune != surrogateMin
-}

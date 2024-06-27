@@ -1,28 +1,40 @@
 package runes
 
-import "unicode/utf8"
+import (
+	"bytes"
+	"io"
+	"strings"
+	"unicode/utf8"
+)
 
-func IsStringFunc(s string) func(rune) bool {
-	return isStrategy(runeMapToSlice(stringToRuneMap(s)))
+// IsInStringSet returns a function that checks if a rune if found in the
+// provided string.
+func IsInStringSet(s string) func(rune) bool {
+	return isStrategy(strings.NewReader(s))
 }
 
-func IsBytesFunc(s []byte) func(rune) bool {
-	return isStrategy(runeMapToSlice(bytesToRuneMap(s)))
+// IsInBytesSet returns a function that checks if a rune if found in the slice
+// of bytes, which is interpreted as a UTF-8 string.
+func IsInBytesSet(s []byte) func(rune) bool {
+	return isStrategy(bytes.NewReader(s))
 }
 
-func IsRunesFunc(s []rune) func(rune) bool {
-	return isStrategy(dedupRuneSlice(s))
+// IsInRunesSet returns a function that checks if a rune if found in the
+// provided slice of runes.
+func IsInRunesSet(s []rune) func(rune) bool {
+	return isStrategy(newRuneReadSeeker(s))
 }
 
 // isStrategy combines all the strategies to have the best of each.
-func isStrategy(s []rune) func(rune) bool {
-	if len(s) == 0 {
+func isStrategy(rr io.RuneReader) func(rune) bool {
+	minRune, span, count := startSpanCount(rr)
+	if count == 0 {
 		return isNeverIn
 	}
 
-	minRune, span := minAndSpan(s)
+	rewindRuneReader(rr)
 	if span < 64 {
-		return isMask64(s, minRune)
+		return isMask64(rr, minRune)
 	}
 
 	// this could use some help here. If we can prove that we have less than the
@@ -37,7 +49,7 @@ func isStrategy(s []rune) func(rune) bool {
 	// slower at runtime. And it does grow worse as more items are added, so it
 	// can't beat the low and constant time of `isMaskSlice64`
 
-	return isMaskSlice64(s, minRune, span)
+	return isMaskSlice64(rr, minRune, span)
 }
 
 // isNeverIn is here to do its job. Why create a closure when I can use the
@@ -52,95 +64,83 @@ func isNeverIn(rune) bool {
 // but it allocates a single big contiguous bitmask, so if you feed it only two
 // runes to check, one being the smallest valid rune and the other being
 // utf8.MaxRune, then it will allocate 136KiB only to check them both.
-func isMaskSlice64(s []rune, minRune, span rune) func(rune) bool {
+func isMaskSlice64(rr io.RuneReader, minRune, span rune) func(rune) bool {
 	t := make([]uint64, 1+span/64)
-	for _, r := range s {
-		r -= minRune
-		t[r/64] |= 1 << (r % 64)
+	for {
+		r, _, err := rr.ReadRune()
+		if err != nil {
+			break
+		}
+		u := uint32(r - minRune)
+		t[u/64] |= 1 << (u % 64)
 	}
 
 	return func(r rune) bool {
-		r -= minRune
-		m := r % 64
-		i := int(r / 64)
-		// checking `r` or `i` is the same, but only `i` does BCE
-		return i >= 0 && i < len(t) && // eliminate runtime.panicIndex
-			m >= 0 && m < 64 && // eliminate runtime.panicshift
-			1<<(m)&t[i] != 0
+		u := uint32(r - minRune)
+		i := int(u / 64)
+		return i < len(t) && 1<<(u%64)&t[i] != 0
 	}
 }
 
 // isMask64 works great when the runes to check for don't have more than 63
 // runes among any combination of them, whatever is their value. Constant time.
-func isMask64(s []rune, minRune rune) func(rune) bool {
+func isMask64(rr io.RuneReader, minRune rune) func(rune) bool {
 	var mask uint64
-	for _, r := range s {
-		mask |= 1 << (r - minRune)
+	for {
+		r, _, err := rr.ReadRune()
+		if err != nil {
+			break
+		}
+		u := uint32(r - minRune)
+		mask |= 1 << u
 	}
 
 	return func(r rune) bool {
-		r -= minRune
-		return r >= 0 && r < 64 && 1<<r&mask != 0
+		u := uint32(r - minRune)
+		return r < 64 && 1<<u&mask != 0
 	}
 }
 
-func minAndSpan(s []rune) (minRune, span rune) {
-	for i, r := range s {
-		if i == 0 || r < minRune {
+func startSpanCount(rr io.RuneReader) (minRune, span rune, count int) {
+	for ; ; count++ {
+		r, _, err := rr.ReadRune()
+		if err != nil {
+			break
+		}
+		if count == 0 || r < minRune {
 			minRune = r
 		}
 		if r > span {
 			span = r
 		}
 	}
-	return minRune, span - minRune
+	return minRune, span - minRune, count
 }
 
-func stringToRuneMap(s string) map[rune]struct{} {
-	m := make(map[rune]struct{}, len(s))
-	for _, r := range s {
-		if utf8.ValidRune(r) {
-			m[r] = struct{}{}
-		}
+func rewindRuneReader(rr io.RuneReader) {
+	if s, _ := rr.(io.Seeker); s != nil {
+		s.Seek(0, io.SeekStart) // safe to discard error
+		return
 	}
-	return m
+	rr.(*runeReadSeekerAdapter).pos = 0
 }
 
-func bytesToRuneMap(s []byte) map[rune]struct{} {
-	m := make(map[rune]struct{}, len(s))
-	for len(s) > 0 {
-		r, size := utf8.DecodeRune(s)
-		if utf8.ValidRune(r) {
-			m[r] = struct{}{}
-		}
-		s = s[size:]
-	}
-	return m
+// runeReadSeekerAdapter is an adapter for internal use. It is not meant to
+// correctly implement all is methods, but just
+type runeReadSeekerAdapter struct {
+	runes []rune
+	pos   int
 }
 
-func dedupRuneSlice(s []rune) []rune {
-	if m := runeSliceToMap(s); len(m) != len(s) {
-		return runeMapToSlice(m)
-	}
-	return s
+func newRuneReadSeeker(s []rune) io.RuneReader {
+	return &runeReadSeekerAdapter{runes: s}
 }
 
-func runeSliceToMap(s []rune) map[rune]struct{} {
-	m := make(map[rune]struct{}, len(s))
-	for _, r := range s {
-		if utf8.ValidRune(r) {
-			m[r] = struct{}{}
-		}
+func (rr *runeReadSeekerAdapter) ReadRune() (r rune, size int, err error) {
+	if rr.pos >= len(rr.runes) {
+		return 0, 0, io.EOF
 	}
-	return m
-}
-
-func runeMapToSlice(m map[rune]struct{}) []rune {
-	s := make([]rune, 0, len(m))
-	for r := range m {
-		if utf8.ValidRune(r) {
-			s = append(s, r)
-		}
-	}
-	return s
+	r = rr.runes[rr.pos]
+	rr.pos++
+	return r, utf8.RuneLen(r), nil
 }
