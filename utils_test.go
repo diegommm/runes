@@ -2,12 +2,28 @@ package runes
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
+	"unsafe"
 )
 
-const maxUint32 = 1<<32 - 1
+const (
+	surrogateMin = 0xD800 // 55296
+	surrogateMax = 0xDFFF // 57343
+)
+
+type WithByteLen interface {
+	ByteLen() (l int, exact bool)
+}
+
+func EstimateByteLen[T any](t T) (_ int, exact bool) {
+	if v, _ := any(t).(WithByteLen); v != nil {
+		return v.ByteLen()
+	}
+	return int(unsafe.Sizeof(t)), false
+}
 
 var runeCases = []struct {
 	r    rune
@@ -23,22 +39,26 @@ var runeCases = []struct {
 	{33554432, "invalid-too-long", 3},
 }
 
-func runRuneTest(t *testing.T, parallelism uint8, f func(*testing.T, rune)) {
+func runRuneTest(t *testing.T, parallelism uint, f func(*testing.T, rune)) {
 	t.Helper()
+
+	if parallelism == 0 {
+		parallelism = uint(runtime.GOMAXPROCS(0))
+	}
 
 	if testing.Short() {
 		for _, c := range runeCases {
-			t.Run(fmt.Sprintf("rune %v", c.r), func(t *testing.T) {
+			t.Run(fmt.Sprintf("rune=%v", c.r), func(t *testing.T) {
 				f(t, c.r)
 			})
 		}
 		return
 	}
 
-	partLen := 1 + maxUint32/int64(parallelism)
-	for i := byte(0); i < parallelism; i++ {
+	partLen := 1 + (1<<32-1)/int64(parallelism)
+	for i := uint(0); i < parallelism; i++ {
 		first := int64(i) * partLen
-		last := min(first+partLen-1, maxUint32)
+		last := min(first+partLen-1, (1<<32 - 1))
 
 		t.Run(fmt.Sprintf("[%v,%v]", rune(first), rune(last)), func(t *testing.T) {
 			t.Parallel()

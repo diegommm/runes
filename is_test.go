@@ -1,6 +1,7 @@
 package runes
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,15 @@ var isInSetImplems = map[string]*struct {
 }{
 	"isStrategy": {
 		isInSetMaker: func(s string) func(rune) bool {
-			return isStrategy(strings.NewReader(s))
+			return isStrategy(RuneReadSeekerToRestarter(strings.NewReader(s)))
+		},
+	},
+	"isMaskString": {
+		isInSetMaker: func(s string) func(rune) bool {
+			r3 := RuneReadSeekerToRestarter(strings.NewReader(s))
+			minRune, span, _ := startSpanCount(r3)
+			r3.Restart()
+			return isMaskString(r3, minRune, span)
 		},
 	},
 	"isSlice": {
@@ -29,10 +38,10 @@ var isInSetImplems = map[string]*struct {
 	},
 	"isMask64": {
 		isInSetMaker: func(s string) func(rune) bool {
-			rr := strings.NewReader(s)
-			minRune, _, _ := startSpanCount(rr)
-			rewindRuneReader(rr)
-			return isMask64(rr, minRune)
+			r3 := RuneReadSeekerToRestarter(strings.NewReader(s))
+			minRune, _, _ := startSpanCount(r3)
+			r3.Restart()
+			return isMask64(r3, minRune)
 		},
 		cond: func(start, span rune, count int) bool {
 			return span < 64
@@ -40,10 +49,10 @@ var isInSetImplems = map[string]*struct {
 	},
 	"isMask32": {
 		isInSetMaker: func(s string) func(rune) bool {
-			rr := strings.NewReader(s)
-			minRune, _, _ := startSpanCount(rr)
-			rewindRuneReader(rr)
-			return isMask32(rr, minRune)
+			r3 := RuneReadSeekerToRestarter(strings.NewReader(s))
+			minRune, _, _ := startSpanCount(r3)
+			r3.Restart()
+			return isMask32(r3, minRune)
 		},
 		cond: func(start, span rune, count int) bool {
 			return span < 32
@@ -51,18 +60,18 @@ var isInSetImplems = map[string]*struct {
 	},
 	"isMaskSlice32": {
 		isInSetMaker: func(s string) func(rune) bool {
-			rr := strings.NewReader(s)
-			minRune, span, _ := startSpanCount(rr)
-			rewindRuneReader(rr)
-			return isMaskSlice32(rr, minRune, span)
+			r3 := RuneReadSeekerToRestarter(strings.NewReader(s))
+			minRune, span, _ := startSpanCount(r3)
+			r3.Restart()
+			return isMaskSlice32(r3, minRune, span)
 		},
 	},
 	"isMaskSlice64": {
 		isInSetMaker: func(s string) func(rune) bool {
-			rr := strings.NewReader(s)
-			minRune, span, _ := startSpanCount(rr)
-			rewindRuneReader(rr)
-			return isMaskSlice64(rr, minRune, span)
+			r3 := RuneReadSeekerToRestarter(strings.NewReader(s))
+			minRune, span, _ := startSpanCount(r3)
+			r3.Restart()
+			return isMaskSlice64(r3, minRune, span)
 		},
 	},
 	"isSparseSet": {
@@ -75,6 +84,7 @@ var isInSetImplems = map[string]*struct {
 type isFuncTestCase struct {
 	f     func(rune) bool
 	runes []rune
+	rt    *unicode.RangeTable
 }
 
 var (
@@ -100,18 +110,18 @@ var (
 
 		// Keep the map key of stdlib funcs starting with uppercase
 		"IsControl": {f: unicode.IsControl},
-		"IsDigit":   {f: unicode.IsDigit},
+		"IsDigit":   {f: unicode.IsDigit, rt: unicode.Digit},
 		"IsGraphic": {f: unicode.IsGraphic},
-		"IsLetter":  {f: unicode.IsLetter},
-		"IsLower":   {f: unicode.IsLower},
-		"IsMark":    {f: unicode.IsMark},
-		"IsNumber":  {f: unicode.IsNumber},
+		"IsLetter":  {f: unicode.IsLetter, rt: unicode.Letter},
+		"IsLower":   {f: unicode.IsLower, rt: unicode.Lower},
+		"IsMark":    {f: unicode.IsMark, rt: unicode.Mark},
+		"IsNumber":  {f: unicode.IsNumber, rt: unicode.Number},
 		"IsPrint":   {f: unicode.IsPrint},
-		"IsPunct":   {f: unicode.IsPunct},
-		"IsSpace":   {f: unicode.IsSpace},
-		"IsSymbol":  {f: unicode.IsSymbol},
-		"IsTitle":   {f: unicode.IsTitle},
-		"IsUpper":   {f: unicode.IsUpper},
+		"IsPunct":   {f: unicode.IsPunct, rt: unicode.Punct},
+		"IsSpace":   {f: unicode.IsSpace, rt: unicode.White_Space},
+		"IsSymbol":  {f: unicode.IsSymbol, rt: unicode.Symbol},
+		"IsTitle":   {f: unicode.IsTitle, rt: unicode.Title},
+		"IsUpper":   {f: unicode.IsUpper, rt: unicode.Upper},
 	}
 )
 
@@ -134,6 +144,7 @@ func generateUnicodeIsFuncsMap() {
 						x.runes = append(x.runes, i.Rune)
 					}
 				}
+				slices.Sort(x.runes)
 			}()
 		}
 	})
@@ -147,7 +158,7 @@ func TestIsFuncsUnicode(t *testing.T) {
 		t.Run("case="+name, func(t *testing.T) {
 			t.Parallel()
 
-			minRune, span, count := startSpanCount(newRuneReadSeeker(isFunc.runes))
+			minRune, span, count := startSpanCount(NewRuneSliceRuneIterator(isFunc.runes))
 			str := string(isFunc.runes)
 
 			for name, implem := range isInSetImplems {

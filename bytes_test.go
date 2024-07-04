@@ -9,7 +9,7 @@ func TestEncodeRune(t *testing.T) {
 	t.Skip("deprecated")
 	t.Parallel()
 
-	runRuneTest(t, 8, func(t *testing.T, r rune) {
+	runRuneTest(t, 0, func(t *testing.T, r rune) {
 		var expb, gotb, got4b [4]byte
 		expn := utf8.EncodeRune(expb[:], r)
 		gotn := EncodeRune(gotb[:], r)
@@ -56,7 +56,7 @@ func TestUTF8Bytes(t *testing.T) {
 	t.Skip("deprecated")
 	t.Parallel()
 
-	runRuneTest(t, 8, func(t *testing.T, r rune) {
+	runRuneTest(t, 0, func(t *testing.T, r rune) {
 		var expb [4]byte
 		expn := utf8.EncodeRune(expb[:], r)
 		gotb, gotn := UTF8BytesValue(r)

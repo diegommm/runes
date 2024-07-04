@@ -4,37 +4,36 @@ import (
 	"bytes"
 	"io"
 	"strings"
-	"unicode/utf8"
 )
 
 // IsInStringSet returns a function that checks if a rune if found in the
 // provided string.
 func IsInStringSet(s string) func(rune) bool {
-	return isStrategy(strings.NewReader(s))
+	return isStrategy(RuneReadSeekerToRestarter(strings.NewReader(s)))
 }
 
 // IsInBytesSet returns a function that checks if a rune if found in the slice
 // of bytes, which is interpreted as a UTF-8 string.
 func IsInBytesSet(s []byte) func(rune) bool {
-	return isStrategy(bytes.NewReader(s))
+	return isStrategy(RuneReadSeekerToRestarter(bytes.NewReader(s)))
 }
 
 // IsInRunesSet returns a function that checks if a rune if found in the
 // provided slice of runes.
 func IsInRunesSet(s []rune) func(rune) bool {
-	return isStrategy(newRuneReadSeeker(s))
+	return isStrategy(NewRuneSliceRuneIterator(s))
 }
 
 // isStrategy combines all the strategies to have the best of each.
-func isStrategy(rr io.RuneReader) func(rune) bool {
-	minRune, span, count := startSpanCount(rr)
+func isStrategy(r3 RuneIterator) func(rune) bool {
+	minRune, span, count := startSpanCount(r3)
 	if count == 0 {
 		return isNeverIn
 	}
 
-	rewindRuneReader(rr)
+	r3.Restart()
 	if span < 64 {
-		return isMask64(rr, minRune)
+		return isMask64(r3, minRune)
 	}
 
 	// this could use some help here. If we can prove that we have less than the
@@ -49,7 +48,7 @@ func isStrategy(rr io.RuneReader) func(rune) bool {
 	// slower at runtime. And it does grow worse as more items are added, so it
 	// can't beat the low and constant time of `isMaskSlice64`
 
-	return isMaskSlice64(rr, minRune, span)
+	return isMaskString(r3, minRune, span)
 }
 
 // isNeverIn is here to do its job. Why create a closure when I can use the
@@ -65,7 +64,7 @@ func isNeverIn(rune) bool {
 // runes to check, one being the smallest valid rune and the other being
 // utf8.MaxRune, then it will allocate 136KiB only to check them both.
 func isMaskSlice64(rr io.RuneReader, minRune, span rune) func(rune) bool {
-	t := make([]uint64, 1+span/64)
+	t := make([]uint64, ceilDiv(span+1, 64))
 	for {
 		r, _, err := rr.ReadRune()
 		if err != nil {
@@ -79,6 +78,39 @@ func isMaskSlice64(rr io.RuneReader, minRune, span rune) func(rune) bool {
 		u := uint32(r - minRune)
 		i := int(u / 64)
 		return i < len(t) && 1<<(u%64)&t[i] != 0
+	}
+}
+
+func isMaskString(rr io.RuneReader, minRune, span rune) func(rune) bool {
+	bin := make([]byte, ceilDiv(span+1, 8))
+	for {
+		r, _, err := rr.ReadRune()
+		if err != nil {
+			break
+		}
+		u := uint32(r - minRune)
+		bin[u/8] |= 1 << (u % 8)
+	}
+
+	var minRuneBytes [3]byte
+	encodeFixedRune(&minRuneBytes, minRune)
+
+	var b strings.Builder
+	b.Grow(len(bin) + 3)
+	b.Write(minRuneBytes[:])
+	b.Write(bin)
+	bin = nil
+	b.Reset()
+	t := b.String()
+
+	return func(r rune) bool {
+		if len(t) < 4 { // BCE
+			return false
+		}
+		u := uint32(r - decodeFixedRune(t[0], t[1], t[2]))
+		i := 3 + int(u/8)
+		// why having runtime.panicIndex is faster here???
+		return i < len(t) && 1<<(u%8)&t[i] != 0
 	}
 }
 
@@ -97,7 +129,7 @@ func isMask64(rr io.RuneReader, minRune rune) func(rune) bool {
 
 	return func(r rune) bool {
 		u := uint32(r - minRune)
-		return r < 64 && 1<<u&mask != 0
+		return u < 64 && 1<<u&mask != 0
 	}
 }
 
@@ -115,32 +147,4 @@ func startSpanCount(rr io.RuneReader) (minRune, span rune, count int) {
 		}
 	}
 	return minRune, span - minRune, count
-}
-
-func rewindRuneReader(rr io.RuneReader) {
-	if s, _ := rr.(io.Seeker); s != nil {
-		s.Seek(0, io.SeekStart) // safe to discard error
-		return
-	}
-	rr.(*runeReadSeekerAdapter).pos = 0
-}
-
-// runeReadSeekerAdapter is an adapter for internal use. It is not meant to
-// correctly implement all is methods, but just
-type runeReadSeekerAdapter struct {
-	runes []rune
-	pos   int
-}
-
-func newRuneReadSeeker(s []rune) io.RuneReader {
-	return &runeReadSeekerAdapter{runes: s}
-}
-
-func (rr *runeReadSeekerAdapter) ReadRune() (r rune, size int, err error) {
-	if rr.pos >= len(rr.runes) {
-		return 0, 0, io.EOF
-	}
-	r = rr.runes[rr.pos]
-	rr.pos++
-	return r, utf8.RuneLen(r), nil
 }

@@ -2,6 +2,7 @@ package runes
 
 import (
 	"io"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -21,13 +22,10 @@ func isSparseSet(s []rune) func(rune) bool {
 // than the mask ones.
 func isSlice(s []rune) func(rune) bool {
 	s = append(s[:0:0], s...) // clone
+	slices.Sort(s)
 	return func(r rune) bool {
-		for _, rr := range s {
-			if r == rr {
-				return true
-			}
-		}
-		return false
+		_, found := slices.BinarySearch(s, r)
+		return found
 	}
 }
 
@@ -74,7 +72,7 @@ func isMask32(rr io.RuneReader, minRune rune) func(rune) bool {
 // architectures, but the operations are nothing fancy, so it probably should
 // hold.
 func isMaskSlice32(rr io.RuneReader, minRune, span rune) func(rune) bool {
-	t := make([]uint32, 1+span/32)
+	t := make([]uint32, ceilDiv(span+1, 32))
 	for {
 		r, _, err := rr.ReadRune()
 		if err != nil {
@@ -85,13 +83,9 @@ func isMaskSlice32(rr io.RuneReader, minRune, span rune) func(rune) bool {
 	}
 
 	return func(r rune) bool {
-		r -= minRune
-		m := r % 32
-		i := int(r / 32)
-		// checking `r` or `i` is the same, but only `i` does BCE
-		return i >= 0 && i < len(t) && // eliminate runtime.panicIndex
-			m >= 0 && m < 32 && // eliminate runtime.panicshift
-			1<<(m)&t[i] != 0
+		u := uint32(r - minRune)
+		i := int(u / 32)
+		return i < len(t) && 1<<(u%32)&t[i] != 0
 	}
 }
 

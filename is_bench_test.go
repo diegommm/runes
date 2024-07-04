@@ -91,11 +91,23 @@ func BenchmarkStdlib(b *testing.B) {
 		}
 
 		b.Run(name, func(b *testing.B) {
-			f := IsInRunesSet(bench.runes)
+			var isInRunesSet, rangeTableToRangeList func(rune) bool
 			testRunes := append(baseTestRunes, bench.runes[0],
 				bench.runes[len(bench.runes)-1])
-			slices.Sort(testRunes)
-			slices.Compact(testRunes)
+
+			if bench.runes[len(bench.runes)-1]-bench.runes[0] >= 64 {
+				isInRunesSet = IsInRunesSet(bench.runes)
+				slices.Sort(testRunes)
+				slices.Compact(testRunes)
+			}
+
+			if bench.rt != nil {
+				r, err := RangeTableToRangeList(bench.rt)
+				if err != nil {
+					b.Fatalf("failed to covert %q: %v", name, err)
+				}
+				rangeTableToRangeList = r.Contains
+			}
 
 			for _, r := range testRunes {
 				b.Run(fmt.Sprintf("rune=%v", r), func(b *testing.B) {
@@ -104,9 +116,20 @@ func BenchmarkStdlib(b *testing.B) {
 							bench.f(r)
 						}
 					})
-					b.Run("implem=local", func(b *testing.B) {
+					b.Run("implem=isInRunesSet", func(b *testing.B) {
+						if isInRunesSet == nil {
+							b.SkipNow()
+						}
 						for i := 0; i < b.N; i++ {
-							f(r)
+							isInRunesSet(r)
+						}
+					})
+					b.Run("implem=rangeTableToRangeList", func(b *testing.B) {
+						if rangeTableToRangeList == nil {
+							b.SkipNow()
+						}
+						for i := 0; i < b.N; i++ {
+							rangeTableToRangeList(r)
 						}
 					})
 				})
