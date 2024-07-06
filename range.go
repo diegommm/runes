@@ -283,6 +283,27 @@ func (x SimpleRange[R]) RuneLen() int32 { return int32(x[1].Max() + 1 - x[0].Min
 func (x SimpleRange[R]) Min() rune      { return x[0].Min() }
 func (x SimpleRange[R]) Max() rune      { return x[1].Max() }
 
+func rangeSliceNth[S ~[]R, R Range](x S, i int32) rune {
+	if i >= 0 && int(i) < len(x) {
+		return x[i].Min()
+	}
+	return -1
+}
+
+func rangeSliceMin[S ~[]R, R Range](x S) rune {
+	if len(x) > 0 {
+		return x[0].Min()
+	}
+	return -1
+}
+
+func rangeSliceMax[S ~[]R, R Range](x S) rune {
+	if len(x) > 0 {
+		return x[len(x)-1].Max()
+	}
+	return -1
+}
+
 // Options for simple lists of runes to create a [Range].
 type (
 	// RuneListRangeLinear needs its items sorted in ascending order.
@@ -298,27 +319,6 @@ type (
 		RuneListRangeLinear[R] | RuneListRangeBinary[R]
 	}
 )
-
-func rangeSliceNth[S ~[]R, R Range](x S, i int32) rune {
-	if i >= 0 && int(i) < len(x) {
-		return x[i].Min()
-	}
-	return -1
-}
-
-func rangeSliceMin[S ~[]R, R Range](x S) rune {
-	if len(x) > 0 {
-		return x[0].Min()
-	}
-	return 0
-}
-
-func rangeSliceMax[S ~[]R, R Range](x S) rune {
-	if len(x) > 0 {
-		return x[len(x)-1].Max()
-	}
-	return 0
-}
 
 // NewRuneListRange return a [RuneListRange] of the specified type from its
 // arguments, which are expected to be sorted in ascending order.
@@ -347,10 +347,8 @@ func NewDynamicRuneListRange(i Iterator) Range {
 	case 0:
 		return EmptyRange
 	case 1:
-		if r, ok := i.NextRune(); ok {
-			return NewDynamicOneValueRange(r)
-		}
-		return EmptyRange
+		r, _ := i.NextRune()
+		return NewDynamicOneValueRange(r)
 	}
 
 	switch u := uint32(i.Max()); {
@@ -368,9 +366,9 @@ func NewDynamicRuneListRange(i Iterator) Range {
 
 	default:
 		if l > maxRuneListLinearSearch {
-			return NewRuneListRange[RuneListRangeBinary[OneValueRange2]](i)
+			return NewRuneListRange[RuneListRangeBinary[OneValueRange3]](i)
 		}
-		return NewRuneListRange[RuneListRangeLinear[OneValueRange2]](i)
+		return NewRuneListRange[RuneListRangeLinear[OneValueRange3]](i)
 	}
 }
 
@@ -703,19 +701,11 @@ func (x bsRange[R]) Max() rune        { return rangeSliceMax(x) }
 // The range is highly coompressed and is fixed at 5 bytes with near-constant
 // performance, regardless of the parameters.
 func NewUniformRange5(minRune rune, runeCount uint16, stride byte) (uniformRange5, error) {
-	if runeCount == 0 {
-		return uniformRange5{}, &errString{"NewUniformRange5: runeCount cannot be zero"}
+	if runeCount < 2 {
+		return uniformRange5{}, &errString{"NewUniformRange5: runeCount must be greater than 1"}
 	}
-	if stride == 0 {
-		return uniformRange5{}, &errString{"NewUniformRange5: stride cannot be zero"}
-	}
-	if stride > 8 {
-		return uniformRange5{}, &errString{"NewUniformRange5: value too long for stride"}
-	}
-	if runeCount == 1 {
-		// stride > 1 here is acceptable but unnecessary. We set it to zero for
-		// consistency
-		stride = 1
+	if stride < 2 || stride > 8 {
+		return uniformRange5{}, &errString{"NewUniformRange5: stride must be in [2,8]"}
 	}
 	var minRuneBytes [3]byte
 	encodeFixedRune(&minRuneBytes, minRune)
@@ -725,7 +715,7 @@ func NewUniformRange5(minRune rune, runeCount uint16, stride byte) (uniformRange
 	return uniformRange5{
 		minRuneBytes[0],
 		minRuneBytes[1],
-		minRuneBytes[2] | encode3MSB(stride-1),
+		minRuneBytes[2] | encode3MSB(stride-2),
 		runeCountBytes[0],
 		runeCountBytes[1],
 	}, nil
@@ -735,7 +725,7 @@ type uniformRange5 [5]byte
 
 func (x uniformRange5) Contains(r rune) bool {
 	u := uint32(r - x.Min())
-	s := uint32(decode3MSB(x[2]) + 1)
+	s := uint32(decode3MSB(x[2]) + 2)
 	c := uint32(decodeUint16(x[3], x[4]))
 	if s < 2 {
 		return u < c
@@ -749,7 +739,7 @@ func (x uniformRange5) Type() string {
 
 func (x uniformRange5) Pos(r rune) int32 {
 	u := uint32(r - x.Min())
-	s := uint32(decode3MSB(x[2]) + 1)
+	s := uint32(decode3MSB(x[2]) + 2)
 	if s > 0 && u%s == 0 && u < s*uint32(decodeUint16(x[3], x[4])) {
 		return int32(u / s)
 	}
@@ -761,7 +751,7 @@ func (x uniformRange5) Nth(i int32) rune {
 	if i < 0 || i >= int32(count) {
 		return -1
 	}
-	return x.Min() + rune(i)*rune(decode3MSB(x[2])+1)
+	return x.Min() + rune(i)*rune(decode3MSB(x[2])+2)
 }
 
 func (x uniformRange5) Min() rune {
@@ -770,7 +760,7 @@ func (x uniformRange5) Min() rune {
 
 func (x uniformRange5) Max() rune {
 	return decodeFixedRune(x[0], x[1], x[2]) + // Min
-		rune(decodeUint16(x[3], x[4])-1)*rune(decode3MSB(x[2])+1)
+		rune(decodeUint16(x[3], x[4])-1)*rune(decode3MSB(x[2])+2)
 }
 
 func (x uniformRange5) RuneLen() int32 {
@@ -779,7 +769,7 @@ func (x uniformRange5) RuneLen() int32 {
 
 func (x uniformRange5) writeToBuffer(b *buffer) {
 	rangeGoString(b, x, bufferWriterFunc(func(b *buffer) {
-		b.str(`{"stride": `).byte(decode3MSB(x[2]) + 1).
+		b.str(`{"stride": `).byte(decode3MSB(x[2]) + 2).
 			str(`, "raw_bytes": `).write(toBufferWriter(intsToBuffer, x[:])).
 			str(`}`)
 	}))
@@ -796,13 +786,13 @@ func (x uniformRange5) GoString() string { return bufferString(x) }
 // is uint16 or rune, respectively. It has near-constant performance, regardless
 // of the parameters, and performs around ~3 times better than NewUniformRange5.
 func NewUniformRange68[T interface{ uint16 | rune }](minRune T, runeCount, stride uint16) (uniformRange68[T], error) {
-	if runeCount == 0 {
+	if runeCount < 2 {
 		return uniformRange68[T]{},
-			&errString{"NewUniformRange8: runeCount cannot be zero"}
+			&errString{"NewUniformRange68: runeCount must be greater than 1"}
 	}
-	if stride == 0 {
+	if stride < 2 {
 		return uniformRange68[T]{},
-			&errString{"NewUniformRange8: stride cannot be zero"}
+			&errString{"NewUniformRange68: stride must be greater than 2"}
 	}
 	if runeCount == 1 {
 		// stride > 1 here is acceptable but unnecessary. We set it to zero for

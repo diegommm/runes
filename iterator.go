@@ -19,8 +19,9 @@ type runesIterator struct {
 }
 
 func (x *runesIterator) NextRune() (rune, bool) {
-	if int(x.pos) < len(x.rs) {
-		return x.rs[x.pos], true
+	if pos := int(x.pos); pos < len(x.rs) {
+		x.pos++
+		return x.rs[pos], true
 	}
 	return 0, false
 }

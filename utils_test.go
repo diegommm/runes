@@ -153,13 +153,20 @@ func makeContiguousRunesString(start, count rune) string {
 	return b.String()
 }
 
-func seq[T xInt](from, to T) []T {
+func seq[T xInt](from, to T, extra ...T) []T {
 	if from > to {
 		panic("from cannot be greater than to")
 	}
-	s := make([]T, to+1-from)
-	for i := range s {
-		s[i] = T(i) + from
+	s := make([]T, 0, to+1-from+T(len(extra)))
+	for i := from; i <= to; i++ {
+		s = append(s, i)
 	}
-	return s
+	return append(s, extra...)
+}
+
+func True(t *testing.T, ok bool) {
+	t.Helper()
+	if !ok {
+		t.Fatalf("unexpected false value")
+	}
 }
