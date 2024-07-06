@@ -83,7 +83,7 @@ func TestUniformRange(t *testing.T) {
 	t.Run("1 value", func(t *testing.T) {
 		t.Parallel()
 
-		r, err := NewUniformRange5(minRune, 1, 0)
+		r, err := NewUniformRange5(minRune, 1, 1)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -93,7 +93,7 @@ func TestUniformRange(t *testing.T) {
 	t.Run("3 contiguous values", func(t *testing.T) {
 		t.Parallel()
 
-		r, err := NewUniformRange5(minRune, 3, 0)
+		r, err := NewUniformRange5(minRune, 3, 1)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
