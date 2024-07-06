@@ -7,11 +7,13 @@ import (
 	"testing"
 	"unicode/utf8"
 	"unsafe"
+
+	"github.com/diegommm/runes/test"
 )
 
 const (
-	surrogateMin = 0xD800 // 55296
-	surrogateMax = 0xDFFF // 57343
+	SurrogateMin = 0xD800 // first rune of surrogate range
+	SurrogateMax = 0xDFFF // last rune of surrogate range
 )
 
 type WithByteLen interface {
@@ -25,20 +27,6 @@ func EstimateByteLen[T any](t T) (_ int, exact bool) {
 	return int(unsafe.Sizeof(t)), false
 }
 
-var runeCases = []struct {
-	r    rune
-	name string
-	n    int // number of bytes of what it should encode to
-}{
-	{-1, "invalid-negative", 3},
-	{97, "valid-1-byte, 1 byte", 1},
-	{209, "valid-2-bytes", 2},
-	{26412, "valid-3-bytes", 3},
-	{55296, "invalid-surrogate", 3},
-	{128169, "valid-4-bytes", 4},
-	{33554432, "invalid-too-long", 3},
-}
-
 func runRuneTest(t *testing.T, parallelism uint, f func(*testing.T, rune)) {
 	t.Helper()
 
@@ -47,9 +35,9 @@ func runRuneTest(t *testing.T, parallelism uint, f func(*testing.T, rune)) {
 	}
 
 	if testing.Short() {
-		for _, c := range runeCases {
-			t.Run(fmt.Sprintf("rune=%v", c.r), func(t *testing.T) {
-				f(t, c.r)
+		for _, tc := range test.RuneCases {
+			t.Run(fmt.Sprintf("rune=%v", tc.Rune), func(t *testing.T) {
+				f(t, tc.Rune)
 			})
 		}
 		return
@@ -105,8 +93,8 @@ func newValidRuneIterator() validRuneIterator {
 }
 
 func (i validRuneIterator) Next() bool {
-	if i.Rune == surrogateMin-1 {
-		i.Rune = surrogateMax + 1
+	if i.Rune == SurrogateMin-1 {
+		i.Rune = SurrogateMax + 1
 		return true
 	}
 	return i.runeIterator.Next()
@@ -125,9 +113,9 @@ func newInvalidRuneIterator() invalidRuneIterator {
 func (i invalidRuneIterator) Next() bool {
 	switch i.Rune {
 	case -1:
-		i.Rune = surrogateMin
+		i.Rune = SurrogateMin
 		return true
-	case surrogateMax:
+	case SurrogateMax:
 		i.Rune = utf8.MaxRune + 1
 		return true
 	default:
@@ -144,8 +132,8 @@ func validRuneSlice(start, count rune) []rune {
 		panic("invalid position")
 	}
 	l := count
-	if start < surrogateMin && end >= surrogateMin {
-		l -= surrogateMax - surrogateMin
+	if start < SurrogateMin && end >= SurrogateMin {
+		l -= SurrogateMax - SurrogateMin
 	}
 	ret := make([]rune, 0, l)
 	i := newValidRuneIterator()
@@ -163,4 +151,15 @@ func makeContiguousRunesString(start, count rune) string {
 		b.WriteRune(start + i)
 	}
 	return b.String()
+}
+
+func seq[T xInt](from, to T) []T {
+	if from > to {
+		panic("from cannot be greater than to")
+	}
+	s := make([]T, to+1-from)
+	for i := range s {
+		s[i] = T(i) + from
+	}
+	return s
 }

@@ -5,13 +5,15 @@ import (
 	"slices"
 	"testing"
 	"unicode"
+
+	"github.com/diegommm/runes/test"
 )
 
 func benchmarkContains(b *testing.B, implem string, f func(rune) bool, extraRunes ...rune) {
-	testRunes := make([]rune, 0, len(runeCases)+len(extraRunes))
+	testRunes := make([]rune, 0, len(test.RuneCases)+len(extraRunes))
 	testRunes = append(testRunes, extraRunes...)
-	for i := range runeCases {
-		testRunes = append(testRunes, runeCases[i].r)
+	for _, rc := range test.RuneCases {
+		testRunes = append(testRunes, rc.Rune)
 	}
 	slices.Sort(testRunes)
 	slices.Compact(testRunes)
@@ -49,8 +51,8 @@ func BenchmarkUniformRange_Contains(b *testing.B) {
 				b.Fatalf("error creating uniform ranges: err5: %v, err8: %v",
 					err5, err8)
 			}
-			r16 := Range16Contains(NewRange16(bc.min, bc.count, bc.stride))
-			r32 := Range32Contains(NewRange32(bc.min, bc.count, bc.stride))
+			//r16 := Range16Contains(NewRange16(bc.min, bc.count, bc.stride))
+			//r32 := Range32Contains(NewRange32(bc.min, bc.count, bc.stride))
 
 			maxRune := r8.Max()
 
@@ -79,16 +81,16 @@ func BenchmarkUniformRange_Contains(b *testing.B) {
 			}
 			benchmarkContains(b, "uniformRange5", r5.Contains, bc.min, maxRune)
 			benchmarkContains(b, "uniformRange8", r8.Contains, bc.min, maxRune)
-			benchmarkContains(b, "unicode.Range16", r16, bc.min, maxRune)
-			benchmarkContains(b, "unicode.Range32", r32, bc.min, maxRune)
+			//benchmarkContains(b, "unicode.Range16", r16, bc.min, maxRune)
+			//benchmarkContains(b, "unicode.Range32", r32, bc.min, maxRune)
 		})
 	}
 }
 
 func BenchmarkFixedRuneEncoding(b *testing.B) {
 	b.Run("case=encodeFixedRune", func(b *testing.B) {
-		for _, rc := range runeCases {
-			r := rc.r
+		for _, rc := range test.RuneCases {
+			r := rc.Rune
 			b.Run(fmt.Sprintf("rune=%v", r), func(b *testing.B) {
 				var runeBytes [3]byte
 				for i := 0; i < b.N; i++ {
@@ -99,10 +101,10 @@ func BenchmarkFixedRuneEncoding(b *testing.B) {
 	})
 
 	b.Run("case=encodeFixedRune", func(b *testing.B) {
-		for _, rc := range runeCases {
+		for _, rc := range test.RuneCases {
 			var rb [3]byte
-			encodeFixedRune(&rb, rc.r)
-			b.Run(fmt.Sprintf("rune=%v", rc.r), func(b *testing.B) {
+			encodeFixedRune(&rb, rc.Rune)
+			b.Run(fmt.Sprintf("rune=%v", rc.Rune), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					decodeFixedRune(rb[0], rb[1], rb[2])
 				}
@@ -112,16 +114,16 @@ func BenchmarkFixedRuneEncoding(b *testing.B) {
 
 	b.Run("case=comparison", func(b *testing.B) {
 		b.Run("implem=decode-compare", func(b *testing.B) {
-			for _, rc1 := range runeCases {
-				r1 := rc1.r
+			for _, rc1 := range test.RuneCases {
+				r1 := rc1.Rune
 				if uint32(r1) > unicode.MaxRune {
 					continue
 				}
 				var r1b [3]byte
 				encodeFixedRune(&r1b, r1)
 				b.Run(fmt.Sprintf("rune1=%v", r1), func(b *testing.B) {
-					for _, rc2 := range runeCases {
-						r2 := rc2.r
+					for _, rc2 := range test.RuneCases {
+						r2 := rc2.Rune
 						b.Run(fmt.Sprintf("rune2=%v", r2), func(b *testing.B) {
 							for i := 0; i < b.N; i++ {
 								if (r1 == r2) != (decodeFixedRune(r1b[0], r1b[1], r1b[2]) == r2) {
@@ -135,16 +137,16 @@ func BenchmarkFixedRuneEncoding(b *testing.B) {
 		})
 
 		b.Run("implem=encode-compare", func(b *testing.B) {
-			for _, rc1 := range runeCases {
-				r1 := rc1.r
+			for _, rc1 := range test.RuneCases {
+				r1 := rc1.Rune
 				if uint32(r1) > unicode.MaxRune {
 					continue
 				}
 				var r1b [3]byte
 				encodeFixedRune(&r1b, r1)
 				b.Run(fmt.Sprintf("rune1=%v", r1), func(b *testing.B) {
-					for _, rc2 := range runeCases {
-						r2 := rc2.r
+					for _, rc2 := range test.RuneCases {
+						r2 := rc2.Rune
 						b.Run(fmt.Sprintf("rune2=%v", r2), func(b *testing.B) {
 							for i := 0; i < b.N; i++ {
 								var r2b [3]byte
@@ -160,16 +162,16 @@ func BenchmarkFixedRuneEncoding(b *testing.B) {
 		})
 
 		b.Run("implem=compareWhileEncoding", func(b *testing.B) {
-			for _, rc1 := range runeCases {
-				r1 := rc1.r
+			for _, rc1 := range test.RuneCases {
+				r1 := rc1.Rune
 				if uint32(r1) > unicode.MaxRune {
 					continue
 				}
 				var r1b [3]byte
 				encodeFixedRune(&r1b, r1)
 				b.Run(fmt.Sprintf("rune1=%v", r1), func(b *testing.B) {
-					for _, rc2 := range runeCases {
-						r2 := rc2.r
+					for _, rc2 := range test.RuneCases {
+						r2 := rc2.Rune
 						b.Run(fmt.Sprintf("rune2=%v", r2), func(b *testing.B) {
 							for i := 0; i < b.N; i++ {
 								if (r1 == r2) != compareWhileEncoding(r2, r1b[0], r1b[1], r1b[2]) {
@@ -183,16 +185,16 @@ func BenchmarkFixedRuneEncoding(b *testing.B) {
 		})
 
 		b.Run("implem=compareWhileDecoding", func(b *testing.B) {
-			for _, rc1 := range runeCases {
-				r1 := rc1.r
+			for _, rc1 := range test.RuneCases {
+				r1 := rc1.Rune
 				if uint32(r1) > unicode.MaxRune {
 					continue
 				}
 				var r1b [3]byte
 				encodeFixedRune(&r1b, r1)
 				b.Run(fmt.Sprintf("rune1=%v", r1), func(b *testing.B) {
-					for _, rc2 := range runeCases {
-						r2 := rc2.r
+					for _, rc2 := range test.RuneCases {
+						r2 := rc2.Rune
 						b.Run(fmt.Sprintf("rune2=%v", r2), func(b *testing.B) {
 							for i := 0; i < b.N; i++ {
 								if (r1 == r2) != compareWhileDecoding(r2, r1b[0], r1b[1], r1b[2]) {

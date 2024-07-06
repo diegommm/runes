@@ -1,9 +1,11 @@
 package runes
 
 import (
-	"slices"
+	"fmt"
 	"testing"
 	"unsafe"
+
+	"github.com/diegommm/runes/test"
 )
 
 func (x twoRange[R]) ByteLen() (int, bool) {
@@ -26,87 +28,156 @@ func (x uniformRange5) ByteLen() (int, bool) {
 	return int(unsafe.Sizeof(x)), true
 }
 
-func testRangeInvariants(t *testing.T, r Range, expectedRunes []rune) {
-	t.Helper()
+func TestEmptyRange(t *testing.T) {
+	t.Parallel()
 
-	Len, Min, Max := r.RuneLen(), r.Min(), r.Max()
+	test.RangeInvariantTestCases{
+		{"always empty", EmptyRange, nil},
+	}.Run(t)
+}
 
-	if Len < 0 || Min < 0 || Max < 0 ||
-		Len == 0 && (Min != 0 || Max != 0) {
-		t.Fatalf("unexpected invariants: len=%v min=%v max=%v", Len, Min, Max)
+func TestOneValueRange(t *testing.T) {
+	t.Parallel()
+
+	run := func(name string, f func(r rune) Range, testCases []rune) {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range testCases {
+				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
+					Name:  fmt.Sprintf("%d", tc),
+					Range: f(tc),
+					Runes: []rune{tc},
+				})
+			}
+		})
 	}
 
-	if v := r.Nth(0); (v >= 0) != (Len > 0) || Min != v {
-		t.Fatalf("unexpected invariants: len=%v min=%v first=%v", Len, Min, v)
+	testCases1 := []rune{0, maxUint8}
+	testCases2 := append(testCases1, maxUint8+1, maxUint16)
+	testCases34 := append(testCases2, maxUint16+1, 1<<20)
+
+	run("OneValueRange1", func(r rune) Range {
+		return NewOneValueRange[OneValueRange1](r)
+	}, testCases1)
+
+	run("OneValueRange2", func(r rune) Range {
+		return NewOneValueRange[OneValueRange2](r)
+	}, testCases2)
+
+	run("OneValueRange3", func(r rune) Range {
+		return NewOneValueRange[OneValueRange3](r)
+	}, testCases34)
+
+	run("OneValueRange4", func(r rune) Range {
+		return NewOneValueRange[OneValueRange4](r)
+	}, testCases34)
+}
+
+func TestNewDynamicOneValueRange(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := NewDynamicOneValueRange(0).(OneValueRange1); !ok {
+		t.Fatalf("invalid type")
+	}
+	if _, ok := NewDynamicOneValueRange(maxUint8).(OneValueRange1); !ok {
+		t.Fatalf("invalid type")
+	}
+	if _, ok := NewDynamicOneValueRange(maxUint8 + 1).(OneValueRange2); !ok {
+		t.Fatalf("invalid type")
+	}
+	if _, ok := NewDynamicOneValueRange(maxUint16).(OneValueRange2); !ok {
+		t.Fatalf("invalid type")
+	}
+	if _, ok := NewDynamicOneValueRange(maxUint16 + 1).(OneValueRange3); !ok {
+		t.Fatalf("invalid type")
+	}
+}
+
+func TestSimpleRange(t *testing.T) {
+	t.Parallel()
+
+	run := func(name string, f func(rune, rune) Range, testCases [][2]rune) {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range testCases {
+				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
+					Name:  fmt.Sprintf("[%d,%d]", tc[0], tc[1]),
+					Range: f(tc[0], tc[1]),
+					Runes: seq[rune](tc[0], tc[1]),
+				})
+			}
+		})
 	}
 
-	if v := r.Nth(Len - 1); (v >= 0) != (Len > 0) || Max != v {
-		t.Fatalf("unexpected invariants: len=%v max=%v last=%v", Len, Max, v)
+	testCases1 := [][2]rune{
+		{0, 0},
+		{0, 1},
+		{0, 2},
+		{maxUint8 - 2, maxUint8},
+		{maxUint8 - 1, maxUint8},
+		{maxUint8, maxUint8},
 	}
 
-	runes := make([]rune, Len)
-	m := make(map[rune]struct{}, Len)
-	for i := range runes {
-		runes[i] = r.Nth(int32(i))
-		if runes[i] < 0 {
-			t.Fatalf("index %d not found with len=%v", i, Len)
-		}
-		if i > 0 && runes[i] <= runes[i-1] {
-			t.Fatalf("rune %v at index %v should be greater than the "+
-				"previous rune %v", runes[i], i, runes[i-1])
-		}
-		m[runes[i]] = struct{}{}
+	testCases2 := [][2]rune{
+		{maxUint8 - 10, maxUint8 + 10},
+		{maxUint16 - 1, maxUint16},
+		{maxUint16, maxUint16},
 	}
+	testCases2 = append(testCases2, testCases1...)
 
-	if !slices.Equal(expectedRunes, runes) {
-		t.Fatalf("mismatched runes:\n\texpected: %v\n\t  actual: %v",
-			expectedRunes, runes)
+	testCases34 := [][2]rune{
+		{maxUint16 - 10, maxUint16 + 10},
+		{1 << 20, 1<<20 + 10},
 	}
+	testCases34 = append(testCases34, testCases2...)
 
-	for i, rr := range runes {
-		if !r.Contains(rr) {
-			t.Fatalf("should contain rune %v with index %d", rr, i)
-		}
+	run("OneValueRange1", func(from, to rune) Range {
+		return Must(NewSimpleRange[OneValueRange1](from, to))
+	}, testCases1)
+
+	run("OneValueRange2", func(from, to rune) Range {
+		return Must(NewSimpleRange[OneValueRange2](from, to))
+	}, testCases2)
+
+	run("OneValueRange3", func(from, to rune) Range {
+		return Must(NewSimpleRange[OneValueRange3](from, to))
+	}, testCases34)
+
+	run("OneValueRange4", func(from, to rune) Range {
+		return Must(NewSimpleRange[OneValueRange4](from, to))
+	}, testCases34)
+}
+
+func TestNewDynamicSimpleRange(t *testing.T) {
+	t.Parallel()
+
+	_, ok := Must(NewDynamicSimpleRange(0, 0)).(SimpleRange[OneValueRange1])
+	if !ok {
+		t.Fatalf("invalid type")
 	}
-
-	runRuneTest(t, 0, func(t *testing.T, rr rune) {
-		if _, ok := m[rr]; !ok && r.Contains(rr) {
-			t.Fatalf("should not contain rune %v", rr)
-		}
-	})
+	_, ok = Must(NewDynamicSimpleRange(0, maxUint8)).(SimpleRange[OneValueRange1])
+	if !ok {
+		t.Fatalf("invalid type")
+	}
+	_, ok = Must(NewDynamicSimpleRange(0, maxUint8+1)).(SimpleRange[OneValueRange2])
+	if !ok {
+		t.Fatalf("invalid type")
+	}
+	_, ok = Must(NewDynamicSimpleRange(0, maxUint16)).(SimpleRange[OneValueRange2])
+	if !ok {
+		t.Fatalf("invalid type")
+	}
+	_, ok = Must(NewDynamicSimpleRange(0, maxUint16+1)).(SimpleRange[OneValueRange3])
+	if !ok {
+		t.Fatalf("invalid type")
+	}
 }
 
 func TestUniformRange(t *testing.T) {
 	t.Parallel()
-	const minRune = 3
-
-	t.Run("1 value", func(t *testing.T) {
-		t.Parallel()
-
-		r, err := NewUniformRange5(minRune, 1, 1)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		testRangeInvariants(t, r, []rune{minRune})
-	})
-
-	t.Run("3 contiguous values", func(t *testing.T) {
-		t.Parallel()
-
-		r, err := NewUniformRange5(minRune, 3, 1)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		testRangeInvariants(t, r, []rune{minRune, minRune + 1, minRune + 2})
-	})
-
-	t.Run("3 values spaced by 4", func(t *testing.T) {
-		t.Parallel()
-
-		r, err := NewUniformRange5(minRune, 3, 4)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		testRangeInvariants(t, r, []rune{minRune, minRune + 5, minRune + 10})
-	})
+	test.RangeInvariantTestCases{
+		{"1 each 1", Must(NewUniformRange5(0, 1, 1)), []rune{0}},
+		{"1 each 1", Must(NewUniformRange5(3, 1, 1)), []rune{3}},
+		{"3 each 1", Must(NewUniformRange5(3, 3, 1)), []rune{3, 4, 5}},
+		{"3 each 5", Must(NewUniformRange5(3, 3, 5)), []rune{3, 8, 13}},
+		{"3 each 7", Must(NewUniformRange5(31, 3, 7)), []rune{31, 38, 45}},
+	}.Run(t)
 }
