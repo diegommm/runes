@@ -3,6 +3,7 @@ package runes
 const (
 	maxUint8  = 1<<8 - 1
 	maxUint16 = 1<<16 - 1
+	maxInt32  = 1<<31 - 1
 
 	lsb5Mask = 1<<5 - 1
 
@@ -17,24 +18,25 @@ type Set interface {
 }
 
 // Range represents an ordered list of runes in the range `[Min(), Max()]`.
+// Positions start at zero.
 type Range interface {
 	Set
-	// Type is a human-readable range type.
+	// Type is a human-readable range type name.
 	Type() string
 	// Pos returns the position of the given rune within the range, or -1 if
-	// it's not found.
-	Pos(rune) int
-	// Nth returns the N-th ordinal rune in the range and true, if there is a
-	// rune at that position. Otherwise, it returns zero and false.
-	Nth(int) (rune, bool)
-	// RuneLen returns the number of runes. This is a method optimized to be
-	// very fast and O(1).
-	RuneLen() int
-	// Min returns the numerically smallest rune. This is a method optimized to
-	// be very fast and O(1).
+	// it's not found. This is best effort.
+	Pos(rune) int32
+	// Nth returns the N-th ordinal rune in the range, or -1 if the index is out
+	// of bound. This is best effort.
+	Nth(int32) rune
+	// RuneLen returns the number of runes in the range, or -1 if the range is
+	// empty. This is a method optimized to be very fast and O(1).
+	RuneLen() int32
+	// Min returns the numerically smallest rune in the range, or -1 if the
+	// range is empty. This is a method optimized to be very fast and O(1).
 	Min() rune
-	// Max returns the numerically biggest rune. This is a method optimized to
-	// be very fast and O(1).
+	// Max returns the numerically biggest rune in the range, or -1 if the range
+	// is empty. This is a method optimized to be very fast and O(1).
 	Max() rune
 }
 
@@ -43,81 +45,27 @@ type Iterator interface {
 	// NextRune returns the next rune and true, or zero and false if there is no
 	// next rune.
 	NextRune() (rune, bool)
-}
-
-// LenIterator is an alternative interface that can be implemented by an
-// [Iterator] to inform of the number of runes that it will yield.
-type LenIterator interface {
-	Iterator
-	// RuneLen returns the number of runes that are still to be returned.
-	RuneLen() int
-}
-
-// MaxIterator is an alternative interface that can be implemented by an
-// [Iterator] to inform the max rune it will yield.
-type MaxIterator interface {
-	Iterator
+	// RuneLen returns the number of runes that haven't been returned yet.
+	RuneLen() int32
+	// Max returns the last rune that will be returned by the iterator, without
+	// consuming it, or -1 if there are no more runes to return.
 	Max() rune
+	// Restart restarts the iterator.
+	Restart()
 }
-
-// RuneReader is the standard library's [io.RuneReader] interface.
-type RuneReader interface {
-	ReadRune() (r rune, size int, err error)
-}
-
-// RuneReaderIterator returns an [Iterator] from the given [RuneReader] which
-// stops at the first error returned by the [ReadRune] method. The runes read
-// must be sorted in ascending order and non-repeating.
-func RuneReaderIterator(rr RuneReader) Iterator {
-	return runeReaderIterator{rr}
-}
-
-type runeReaderIterator struct {
-	RuneReader
-}
-
-func (x runeReaderIterator) NextRune() (rune, bool) {
-	if x.RuneReader == nil {
-		return 0, false
-	}
-	r, _, err := x.RuneReader.ReadRune()
-	if err != nil {
-		x.RuneReader = nil
-		return 0, false
-	}
-	return r, true
-}
-
-// RangeIterator returns an [Iterator] from the given [Range].
-func RangeIterator(r Range) Iterator {
-	return &rangeIterator{r: r}
-}
-
-type rangeIterator struct {
-	r   Range
-	pos int
-}
-
-func (x *rangeIterator) NextRune() (rune, bool) {
-	if r, ok := x.r.Nth(x.pos); ok {
-		x.pos++
-		return r, true
-	}
-	return 0, false
-}
-
-func (x *rangeIterator) RuneLen() int { return x.r.RuneLen() - x.pos }
-func (x *rangeIterator) Max() rune    { return x.r.Max() }
 
 // RunesIterator returns an iterator from the given slice of runes, which must
 // be in sorted ascending order and non-repeating.
 func RunesIterator(rs []rune) Iterator {
+	if len(rs) > maxInt32 {
+		panic("RunesIterator: runes overflow")
+	}
 	return &runesIterator{rs: rs}
 }
 
 type runesIterator struct {
 	rs  []rune
-	pos uint
+	pos uint32
 }
 
 func (x *runesIterator) NextRune() (rune, bool) {
@@ -127,49 +75,147 @@ func (x *runesIterator) NextRune() (rune, bool) {
 	return 0, false
 }
 
-func (x *runesIterator) RuneLen() int { return len(x.rs) }
 func (x *runesIterator) Max() rune {
 	if len(x.rs) > 0 {
 		return x.rs[len(x.rs)-1]
 	}
-	return 0
+	return -1
 }
 
-// RangeGoString pretty prints a Range for debugging.
-func RangeGoString(r Range) string {
-	if gs, _ := r.(interface{ GoString() string }); gs != nil {
-		return gs.GoString()
+func (x *runesIterator) RuneLen() int32 { return int32(len(x.rs)) }
+func (x *runesIterator) Restart()       { x.pos = 0 }
+
+// RuneReader is the standard library's [io.RuneReader] interface.
+type RuneReader interface {
+	ReadRune() (r rune, size int, err error)
+}
+
+// ReadAllRunes returns all the runes read from the given [RuneReader]. It stops
+// at the first error.
+func ReadAllRunes(rr RuneReader) []rune {
+	var l int
+	if rrl, ok := rr.(interface{ Len() int }); ok {
+		l = rrl.Len() // we will have at most this amount of runes
 	}
-	return rangeGoString(newBuffer(), r, nullbufferWriter).String()
+	rs := make([]rune, 0, l)
+	for {
+		r, _, err := rr.ReadRune()
+		if err != nil {
+			break
+		}
+		rs = append(rs, r)
+	}
+
+	return rs
 }
 
-func writerOrGoStringToBuffer[T Range](b *buffer, v T) *buffer {
-	if bw, ok := any(v).(bufferWriter); ok {
+// RangeIterator returns an [Iterator] from the given [Range].
+func RangeIterator(r Range) Iterator {
+	return &rangeIterator{r: r}
+}
+
+type rangeIterator struct {
+	r   Range
+	pos int32
+}
+
+func (x *rangeIterator) NextRune() (rune, bool) {
+	if r := x.r.Nth(x.pos); r >= 0 {
+		x.pos++
+		return r, true
+	}
+	return 0, false
+}
+
+func (x *rangeIterator) RuneLen() int32 { return x.r.RuneLen() - x.pos }
+func (x *rangeIterator) Max() rune      { return x.r.Max() }
+func (x *rangeIterator) Restart()       { x.pos = 0 }
+
+// Merge merges multiple [Range] values into a single iterator.
+func Merge(rs ...Range) Iterator {
+	is := make([]Iterator, len(rs))
+	for i := range rs {
+		is[i] = RangeIterator(rs[i])
+	}
+	return MergeIterators(is...)
+}
+
+// MergeIterators merges multiple iterators in a consistent manner.
+func MergeIterators(is ...Iterator) Iterator {
+	var l int32
+	for i := range is {
+		l += is[i].RuneLen()
+	}
+	rs := make([]rune, 0, l) // we will have at most `l` runes
+
+	// initialize list of iterators runes
+	isRunes := make([]rune, 0, len(is))
+	for i := len(is) - 1; i >= 0; i-- {
+		r, ok := is[i].NextRune()
+		if !ok {
+			removeSliceItem(&is, i)
+			continue
+		}
+		isRunes = append(isRunes, r)
+	}
+
+	for len(isRunes) > 0 {
+		// find the smallest rune and append it to our list
+		var minIdx int
+		minRune := isRunes[minIdx]
+		for i, r := range isRunes {
+			if r < minRune {
+				minRune, minIdx = r, i
+			}
+		}
+		rs = append(rs, minRune)
+
+		// prune the smallest rune
+		for i := len(isRunes) - 1; i >= minIdx; i-- {
+			if isRunes[i] == minRune {
+				r, ok := is[i].NextRune()
+				if !ok {
+					removeSliceItem(&is, i)
+					removeSliceItem(&isRunes, i)
+					continue
+				}
+				isRunes[i] = r
+			}
+		}
+	}
+
+	return RunesIterator(rs)
+}
+
+func writerOrGoStringToBuffer[R Range](b *buffer, r R) *buffer {
+	if bw, ok := any(r).(bufferWriter); ok {
 		b.write(bw)
+	} else if gs, ok := any(r).(interface{ GoString() string }); ok {
+		b.str(gs.GoString())
 	} else {
-		b.str(RangeGoString(v))
+		rangeGoString(b, r, nullbufferWriter)
 	}
 	return b
 }
 
+var nullbufferWriter = bufferWriterFunc(func(b *buffer) { b.str("null") })
+
 // rangeGoString is used by internal helper to provide more details about an
 // implementation's structure. It generally follows roughly a JSON format, but
 // it doen't need to.
-func rangeGoString[T bufferWriter](b *buffer, r Range, propertiesWriter T) *buffer {
-	return b.
+func rangeGoString[T bufferWriter](b *buffer, r Range, propertiesWriter T) {
+	b.
 		str(`{"type": "`).str(r.Type()).
-		str(`", "len": `).int(r.RuneLen()).
+		str(`", "len": `).int32(r.RuneLen()).
 		str(`, "min": `).rune(r.Min()).
 		str(`, "max": `).rune(r.Max()).
 		str(`, "properties": `).write(propertiesWriter).
 		str(`}`)
 }
 
-var nullbufferWriter = bufferWriterFunc(func(b *buffer) { b.str("null") })
-
 // SortRangeFunc is a function that can be used with the `slices` package to
-// sort Ranges. To check if a set of Ranges overlap, first sort them using this
-// function and then call [Overlap].
+// sort a slice of Ranges. To check if a set of Ranges overlap, first sort them
+// using this function and then call [Overlap].
 func SortRangeFunc[R Range](a, b R) int {
 	am, bm := a.Min(), b.Min()
 	switch {
@@ -202,13 +248,13 @@ var EmptyRange = emptyRange{}
 
 type emptyRange struct{}
 
-func (emptyRange) Contains(rune) bool   { return false }
-func (emptyRange) Type() string         { return "empty" }
-func (emptyRange) Pos(rune) int         { return -1 }
-func (emptyRange) Nth(int) (rune, bool) { return 0, false }
-func (emptyRange) RuneLen() int         { return 0 }
-func (emptyRange) Min() rune            { return 0 }
-func (emptyRange) Max() rune            { return 0 }
+func (emptyRange) Contains(rune) bool { return false }
+func (emptyRange) Type() string       { return "empty" }
+func (emptyRange) Pos(rune) int32     { return -1 }
+func (emptyRange) Nth(int32) rune     { return -1 }
+func (emptyRange) RuneLen() int32     { return 0 }
+func (emptyRange) Min() rune          { return -1 }
+func (emptyRange) Max() rune          { return -1 }
 
 // Valid types that can be used to encode a [Range] that contains a single rune,
 // depending on how many bytes will be used to store it.
@@ -283,7 +329,7 @@ func NewDynamicOneValueRange(r rune) Range {
 	}
 }
 
-func oneValuePos(r1, r2 rune) int {
+func oneValuePos(r1, r2 rune) int32 {
 	if r1 == r2 {
 		return 0
 	}
@@ -305,19 +351,19 @@ func (x oneValueRange124[T]) Type() string {
 	}
 }
 
-func (x oneValueRange124[T]) Pos(r rune) int {
+func (x oneValueRange124[T]) Pos(r rune) int32 {
 	return oneValuePos(r, rune(x[0]))
 }
 
-func (x oneValueRange124[T]) Nth(i int) (rune, bool) {
+func (x oneValueRange124[T]) Nth(i int32) rune {
 	if i == 0 {
-		return rune(x[0]), true
+		return rune(x[0])
 	}
-	return 0, false
+	return -1
 }
 
 func (x oneValueRange124[T]) Contains(r rune) bool    { return r == rune(x[0]) }
-func (x oneValueRange124[T]) RuneLen() int            { return 1 }
+func (x oneValueRange124[T]) RuneLen() int32          { return 1 }
 func (x oneValueRange124[T]) Min() rune               { return rune(x[0]) }
 func (x oneValueRange124[T]) Max() rune               { return rune(x[0]) }
 func (x oneValueRange124[T]) writeToBuffer(b *buffer) { b.rune(x.Min()) }
@@ -337,24 +383,24 @@ func (x oneValueRange3) Min() rune {
 	return rune(decodeFixedRune(x[0], x[1], x[2]))
 }
 
-func (x oneValueRange3) Nth(i int) (rune, bool) {
+func (x oneValueRange3) Nth(i int32) rune {
 	if i == 0 {
-		return x.Min(), true
+		return x.Min()
 	}
-	return 0, false
+	return -1
 }
 
-func (x oneValueRange3) Pos(r rune) int          { return oneValuePos(r, x.Min()) }
-func (x oneValueRange3) RuneLen() int            { return 1 }
+func (x oneValueRange3) Pos(r rune) int32        { return oneValuePos(r, x.Min()) }
+func (x oneValueRange3) RuneLen() int32          { return 1 }
 func (x oneValueRange3) Max() rune               { return x.Min() }
 func (x oneValueRange3) writeToBuffer(b *buffer) { b.rune(x.Min()) }
 func (x oneValueRange3) GoString() string        { return bufferString(x) }
 
-func rangeSliceNth[S ~[]R, R Range](x S, i int) (rune, bool) {
-	if i >= 0 && i < len(x) {
-		return x[i].Min(), true
+func rangeSliceNth[S ~[]R, R Range](x S, i int32) rune {
+	if i >= 0 && int(i) < len(x) {
+		return x[i].Min()
 	}
-	return 0, false
+	return -1
 }
 
 func rangeSliceMin[S ~[]R, R Range](x S) rune {
@@ -393,6 +439,7 @@ func NewDynamicSimpleRange(from, to rune) Range {
 	}
 }
 
+// SimpleRange is the inclusive range of runes contained in both of its ends.
 type SimpleRange[R OneValueRange] [2]R
 
 func (x SimpleRange[R]) Contains(r rune) bool {
@@ -403,23 +450,23 @@ func (x SimpleRange[R]) Type() string {
 	return "simple range of from-to rune values"
 }
 
-func (x SimpleRange[R]) Pos(r rune) int {
+func (x SimpleRange[R]) Pos(r rune) int32 {
 	if m := x[0].Min(); r >= m && r <= x[1].Max() {
-		return int(r - m)
+		return int32(r - m)
 	}
 	return -1
 }
 
-func (x SimpleRange[R]) Nth(i int) (rune, bool) {
+func (x SimpleRange[R]) Nth(i int32) rune {
 	if r, m := rune(i), x[0].Min(); r >= 0 && r < x[1].Max()-m {
-		return r + m, true
+		return r + m
 	}
-	return -1, false
+	return -1
 }
 
-func (x SimpleRange[R]) RuneLen() int { return int(x[1].Max() - x[0].Min()) }
-func (x SimpleRange[R]) Min() rune    { return x[0].Min() }
-func (x SimpleRange[R]) Max() rune    { return x[1].Max() }
+func (x SimpleRange[R]) RuneLen() int32 { return int32(x[1].Max() - x[0].Min()) }
+func (x SimpleRange[R]) Min() rune      { return x[0].Min() }
+func (x SimpleRange[R]) Max() rune      { return x[1].Max() }
 
 // Options for simple lists of runes to create a [Range].
 type (
@@ -440,11 +487,7 @@ type (
 // NewRuneListRange return a [RuneListRange] of the specified type from its
 // arguments, which are expected to be sorted in ascending order.
 func NewRuneListRange[L RuneListRange[R], R OneValueRange](i Iterator) L {
-	var l int
-	if li, ok := i.(LenIterator); ok {
-		l = li.RuneLen()
-	}
-	r := make(L, 0, l)
+	r := make(L, 0, i.RuneLen())
 	for {
 		rr, ok := i.NextRune()
 		if !ok {
@@ -463,26 +506,18 @@ func NewRuneListRange[L RuneListRange[R], R OneValueRange](i Iterator) L {
 // sophisticated techniques that use either bitmaps, regularity of distribution,
 // etc.
 func NewDynamicRuneListRange(i Iterator) Range {
-	l := maxRuneListLinearSearch + 1
-	if il, ok := i.(LenIterator); ok {
-		l = il.RuneLen()
-		switch l {
-		case 0:
-			return EmptyRange
-		case 1:
-			if r, ok := i.NextRune(); ok {
-				return NewDynamicOneValueRange(r)
-			}
-			return EmptyRange
+	l := i.RuneLen()
+	switch l {
+	case 0:
+		return EmptyRange
+	case 1:
+		if r, ok := i.NextRune(); ok {
+			return NewDynamicOneValueRange(r)
 		}
+		return EmptyRange
 	}
 
-	maxRune := rune(-1) // default to max length when converted to uint32
-	if mi, ok := i.(MaxIterator); ok {
-		maxRune = mi.Max()
-	}
-
-	switch u := uint32(maxRune); {
+	switch u := uint32(i.Max()); {
 	case u <= maxUint8:
 		if l > maxRuneListLinearSearch {
 			return NewRuneListRange[RuneListRangeBinary[OneValueRange1]](i)
@@ -507,59 +542,124 @@ func (x RuneListRangeLinear[R]) Type() string {
 	return "list of runes, using linear search"
 }
 
-func (x RuneListRangeLinear[R]) Pos(r rune) int {
+func (x RuneListRangeLinear[R]) Pos(r rune) int32 {
 	if len(x) == 0 || r < x[0].Min() || x[len(x)-1].Min() < r {
 		return -1
 	}
 	return x.posSlow(r)
 }
 
-func (x RuneListRangeLinear[R]) posSlow(r rune) int {
+func (x RuneListRangeLinear[R]) posSlow(r rune) int32 {
 	for i := range x {
 		if r == x[i].Min() {
-			return i
+			return int32(i)
 		}
 	}
 	return -1
 }
 
-func (x RuneListRangeLinear[R]) Contains(r rune) bool   { return x.Pos(r) >= 0 }
-func (x RuneListRangeLinear[R]) Nth(i int) (rune, bool) { return rangeSliceNth(x, i) }
-func (x RuneListRangeLinear[R]) RuneLen() int           { return len(x) }
-func (x RuneListRangeLinear[R]) Min() rune              { return rangeSliceMin(x) }
-func (x RuneListRangeLinear[R]) Max() rune              { return rangeSliceMax(x) }
+func (x RuneListRangeLinear[R]) Contains(r rune) bool { return x.Pos(r) >= 0 }
+func (x RuneListRangeLinear[R]) Nth(i int32) rune     { return rangeSliceNth(x, i) }
+func (x RuneListRangeLinear[R]) RuneLen() int32       { return int32(len(x)) }
+func (x RuneListRangeLinear[R]) Min() rune            { return rangeSliceMin(x) }
+func (x RuneListRangeLinear[R]) Max() rune            { return rangeSliceMax(x) }
 
 func (x RuneListRangeBinary[R]) Type() string {
 	return "list of runes, using binary search"
 }
 
-func (x RuneListRangeBinary[R]) Pos(r rune) int {
+func (x RuneListRangeBinary[R]) Pos(r rune) int32 {
 	if len(x) == 0 || r < x[0].Min() || x[len(x)-1].Min() < r {
 		return -1
 	}
 	return x.posSlow(r)
 }
 
-func (x RuneListRangeBinary[R]) posSlow(r rune) int {
-	i, j := uint(0), uint(len(x)-1)
-	for h := (i + j) >> 1; i <= j && int(h) < len(x); h = (i + j) >> 1 {
+func (x RuneListRangeBinary[R]) posSlow(r rune) int32 {
+	i, j := uint32(0), uint32(len(x)-1)
+	for h := u32Half(i, j); i <= j && int(h) < len(x); h = u32Half(i, j) {
 		switch v := x[h].Min(); {
 		case r < v:
 			j = h - 1
 		case v < r:
 			i = h + 1
 		default:
-			return int(h)
+			return int32(h)
 		}
 	}
 	return -1
 }
 
-func (x RuneListRangeBinary[R]) Contains(r rune) bool   { return x.Pos(r) >= 0 }
-func (x RuneListRangeBinary[R]) Nth(i int) (rune, bool) { return rangeSliceNth(x, i) }
-func (x RuneListRangeBinary[R]) RuneLen() int           { return len(x) }
-func (x RuneListRangeBinary[R]) Min() rune              { return rangeSliceMin(x) }
-func (x RuneListRangeBinary[R]) Max() rune              { return rangeSliceMax(x) }
+func (x RuneListRangeBinary[R]) Contains(r rune) bool { return x.Pos(r) >= 0 }
+func (x RuneListRangeBinary[R]) Nth(i int32) rune     { return rangeSliceNth(x, i) }
+func (x RuneListRangeBinary[R]) RuneLen() int32       { return int32(len(x)) }
+func (x RuneListRangeBinary[R]) Min() rune            { return rangeSliceMin(x) }
+func (x RuneListRangeBinary[R]) Max() rune            { return rangeSliceMax(x) }
+
+// ExceptionRange returns a [Range] that is exactly the same as `m`, except for
+// the items in `x`, whose items must be a subset of `m` and not match x.Min()
+// nor x.Max().
+func ExceptionRange[M, X Range](match M, except X) Range {
+	return exceptionRange[M, X]{match, except}
+}
+
+type exceptionRange[M, X Range] struct {
+	m M
+	x X
+}
+
+func (x exceptionRange[M, X]) Contains(r rune) bool {
+	return !x.x.Contains(r) && x.m.Contains(r)
+}
+
+func (x exceptionRange[M, X]) Type() string {
+	return "range excepting internal subset, first checking exception"
+}
+
+func (x exceptionRange[M, X]) Pos(r rune) int32 {
+	mPos := x.m.Pos(r)
+	if mPos < 0 {
+		return mPos
+	}
+	xStartPos := x.m.Nth(x.x.Min())
+	if mPos < xStartPos {
+		return mPos
+	}
+	xLen := x.x.RuneLen()
+	if mPos < xStartPos+xLen {
+		return -1
+	}
+	return mPos - xLen
+}
+
+func (x exceptionRange[M, X]) Nth(i int32) rune {
+	mLen, xLen := x.m.RuneLen(), x.x.RuneLen()
+	if i < 0 || i >= mLen-xLen {
+		return -1
+	}
+	if xStartPos := x.m.Nth(x.x.Min()); i >= xStartPos {
+		return x.m.Nth(i - xStartPos)
+	}
+	return x.m.Nth(i)
+}
+
+func (x exceptionRange[M, X]) RuneLen() int32 {
+	return x.m.RuneLen() - x.x.RuneLen()
+}
+
+func (x exceptionRange[M, X]) writeToBuffer(b *buffer) {
+	rangeGoString(b, x, bufferWriterFunc(func(b *buffer) {
+		b.str(`{"matching": `).
+			write(toBufferWriter(writerOrGoStringToBuffer, x.m)).
+			str(`,"excepting":`).
+			write(toBufferWriter(writerOrGoStringToBuffer, x.x)).
+			str(`}`)
+	}))
+}
+
+func (x exceptionRange[M, X]) Min() rune        { return x.m.Min() }
+func (x exceptionRange[M, X]) Max() rune        { return x.m.Max() }
+func (x exceptionRange[M, X]) GoString() string { return bufferString(x) }
 
 // NewRangeList returns a new [Range] from the given list, which must be
 // sorted in increasing order and non-overlapping. Use [Range] as type parameter
@@ -600,7 +700,7 @@ func (x twoRange[R]) Type() string {
 	return "two ranges combined"
 }
 
-func (x twoRange[R]) Pos(r rune) int {
+func (x twoRange[R]) Pos(r rune) int32 {
 	// inlined method: Min and Max are generally very fast, so we can rapidly
 	// discard most of the rune-space by checking boundaries
 	if r < x[0].Min() || r > x[1].Max() {
@@ -609,8 +709,8 @@ func (x twoRange[R]) Pos(r rune) int {
 	return x.posSlow(r)
 }
 
-func (x twoRange[R]) posSlow(r rune) int {
-	pos := -1
+func (x twoRange[R]) posSlow(r rune) int32 {
+	pos := int32(-1)
 	if rx := x.rxPos(r); rx < 2 {
 		pos = x[rx].Pos(r)
 		if pos >= 0 && rx == 1 {
@@ -620,7 +720,7 @@ func (x twoRange[R]) posSlow(r rune) int {
 	return pos
 }
 
-func (x twoRange[R]) rxPos(r rune) uint {
+func (x twoRange[R]) rxPos(r rune) uint32 {
 	// inlined method: Min and Max are generally very fast, so we can rapidly
 	// discard most of the rune-space by checking boundaries
 	if r < x[0].Min() || r > x[1].Max() {
@@ -632,17 +732,17 @@ func (x twoRange[R]) rxPos(r rune) uint {
 	return 0
 }
 
-func (x twoRange[R]) Nth(i int) (rune, bool) {
+func (x twoRange[R]) Nth(i int32) rune {
 	l0, l1 := x[0].RuneLen(), x[1].RuneLen()
 	switch {
 	case i < 0:
-		return 0, false
+		return -1
 	case i < l0:
 		return x[0].Nth(i)
 	case i < l0+l1:
 		return x[1].Nth(i - l0)
 	default:
-		return 0, false
+		return -1
 	}
 }
 
@@ -656,7 +756,7 @@ func (x twoRange[R]) writeToBuffer(b *buffer) {
 	}))
 }
 
-func (x twoRange[R]) RuneLen() int     { return x[0].RuneLen() + x[1].RuneLen() }
+func (x twoRange[R]) RuneLen() int32   { return x[0].RuneLen() + x[1].RuneLen() }
 func (x twoRange[R]) Min() rune        { return x[0].Min() }
 func (x twoRange[R]) Max() rune        { return x[1].Max() }
 func (x twoRange[R]) GoString() string { return bufferString(x) }
@@ -678,12 +778,12 @@ func (x bsRange[R]) Type() string {
 
 // Pos is not optimized. lsRange/bsRange are best effort for anything other than
 // Contains.
-func (x bsRange[R]) Pos(r rune) int {
-	pos := -1
+func (x bsRange[R]) Pos(r rune) int32 {
+	pos := int32(-1)
 	if rx := x.rxPos(r); int(rx) < len(x) {
 		pos = x[rx].Pos(r)
 		if pos >= 0 {
-			for i := uint(0); i < rx; i++ {
+			for i := uint32(0); i < rx; i++ {
 				pos += x[i].RuneLen()
 			}
 		}
@@ -691,18 +791,18 @@ func (x bsRange[R]) Pos(r rune) int {
 	return pos
 }
 
-func (x bsRange[R]) rxPos(r rune) uint {
+func (x bsRange[R]) rxPos(r rune) uint32 {
 	// inlined method: Min and Max are generally very fast, so we can rapidly
 	// discard most of the rune-space by checking boundaries
 	if r < x[0].Min() || r > x[len(x)-1].Max() {
-		return uint(len(x))
+		return uint32(len(x))
 	}
 	return x.rxPosSlow(r)
 }
 
-func (x bsRange[R]) rxPosSlow(r rune) uint {
-	i, j := uint(0), uint(len(x)-1)
-	for h := (i + j) >> 1; i < j && int(h) < len(x); h = (i + j) >> 1 {
+func (x bsRange[R]) rxPosSlow(r rune) uint32 {
+	i, j := uint32(0), uint32(len(x)-1)
+	for h := u32Half(i, j); i < j && int(h) < len(x); h = u32Half(i, j) {
 		xh := x[h]
 		switch {
 		case r < xh.Min():
@@ -716,14 +816,12 @@ func (x bsRange[R]) rxPosSlow(r rune) uint {
 	if i == j {
 		return i // save one call to x[h].Min()
 	}
-	return uint(len(x))
+	return uint32(len(x))
 }
 
-// Nth is not optimized. lsRange/bsRange are best effort for anything other than
-// Contains.
-func (x bsRange[R]) Nth(i int) (rune, bool) {
+func (x bsRange[R]) Nth(i int32) rune {
 	if i < 0 || len(x) < 1 {
-		return 0, false
+		return -1
 	}
 	for _, rr := range x {
 		l := rr.RuneLen()
@@ -732,11 +830,11 @@ func (x bsRange[R]) Nth(i int) (rune, bool) {
 		}
 		i -= l
 	}
-	return 0, false
+	return -1
 }
 
-func (x bsRange[R]) RuneLen() int {
-	var total int
+func (x bsRange[R]) RuneLen() int32 {
+	var total int32
 	for _, rr := range x {
 		total += rr.RuneLen()
 	}
@@ -785,7 +883,8 @@ func NewUniformRange5(minRune rune, runeCount uint16, stride byte) (uniformRange
 	}
 	var minRuneBytes [3]byte
 	encodeFixedRune(&minRuneBytes, minRune)
-	runeCountBytes := encodeUint16(runeCount)
+	var runeCountBytes [2]byte
+	encodeUint16(&runeCountBytes, runeCount)
 
 	return uniformRange5{
 		minRuneBytes[0],
@@ -812,21 +911,21 @@ func (x uniformRange5) Type() string {
 	return "range of uniformly distributed runes, stored in 5 bytes"
 }
 
-func (x uniformRange5) Pos(r rune) int {
+func (x uniformRange5) Pos(r rune) int32 {
 	u := uint32(r - x.Min())
 	s := uint32(decode3MSB(x[2]) + 1)
 	if s > 0 && u%s == 0 && u < s*uint32(decodeUint16(x[3], x[4])) {
-		return int(u / s)
+		return int32(u / s)
 	}
 	return -1
 }
 
-func (x uniformRange5) Nth(i int) (rune, bool) {
+func (x uniformRange5) Nth(i int32) rune {
 	count := decodeUint16(x[3], x[4])
-	if i < 0 || i >= int(count) {
-		return 0, false
+	if i < 0 || i >= int32(count) {
+		return -1
 	}
-	return x.Min() + rune(i)*rune(decode3MSB(x[2])+1), true
+	return x.Min() + rune(i)*rune(decode3MSB(x[2])+1)
 }
 
 func (x uniformRange5) Min() rune {
@@ -838,8 +937,8 @@ func (x uniformRange5) Max() rune {
 		rune(decodeUint16(x[3], x[4])-1)*rune(decode3MSB(x[2])+1)
 }
 
-func (x uniformRange5) RuneLen() int {
-	return int(decodeUint16(x[3], x[4]))
+func (x uniformRange5) RuneLen() int32 {
+	return int32(decodeUint16(x[3], x[4]))
 }
 
 func (x uniformRange5) writeToBuffer(b *buffer) {
@@ -903,20 +1002,20 @@ func (x uniformRange68[T]) Type() string {
 	}
 }
 
-func (x uniformRange68[T]) Pos(r rune) int {
+func (x uniformRange68[T]) Pos(r rune) int32 {
 	u, s := uint32(r-rune(x.min)), uint32(x.stride)
 	if s > 0 && // always true, but removes runtime.panicdivide
 		u%s == 0 && u < s*uint32(x.count) {
-		return int(u / s)
+		return int32(u / s)
 	}
 	return -1
 }
 
-func (x uniformRange68[T]) Nth(i int) (rune, bool) {
-	if i < 0 || i >= int(x.count) {
-		return 0, false
+func (x uniformRange68[T]) Nth(i int32) rune {
+	if i < 0 || i >= int32(x.count) {
+		return -1
 	}
-	return rune(x.min) + rune(i)*rune(x.stride), true
+	return rune(x.min) + rune(i)*rune(x.stride)
 }
 
 func (x uniformRange68[T]) Max() rune {
@@ -925,13 +1024,128 @@ func (x uniformRange68[T]) Max() rune {
 
 func (x uniformRange68[T]) writeToBuffer(b *buffer) {
 	rangeGoString(b, x, bufferWriterFunc(func(b *buffer) {
-		b.str(`{"stride": `).uint(uint(x.stride)).str(`}`)
+		b.str(`{"stride": `).uint64(uint64(x.stride)).str(`}`)
 	}))
 }
 
-func (x uniformRange68[T]) RuneLen() int     { return int(x.count) }
+func (x uniformRange68[T]) RuneLen() int32   { return int32(x.count) }
 func (x uniformRange68[T]) Min() rune        { return rune(x.min) }
 func (x uniformRange68[T]) GoString() string { return bufferString(x) }
+
+// NewStringBitmapRange ...
+func NewStringBitmapRange(i Iterator) (StringBitmap, error) {
+	minRune, ok := i.NextRune() // get minRune
+	if !ok {
+		return "", nil
+	}
+	numEls := uint64(i.Max() + 1 - minRune)
+	if numEls < 0 || numEls > maxUint16 {
+		return "", newBuffer().uint64(numEls).
+			str(" exceeds maximum number of elements: ").
+			uint64(maxUint16).
+			Err()
+	}
+
+	// allocate for the whole string
+	bin := make([]byte, stringBitmapHeaderLen+ceilDiv(numEls, 8))
+
+	// encode header
+	encodeFixedRune((*[3]byte)(bin), minRune)
+	encodeUint16((*[2]byte)(bin[3:]), uint16(numEls))
+
+	// build the bitmap
+	r := minRune
+	bm := bin[stringBitmapHeaderLen:]
+	for {
+		u := uint32(r + 1 - minRune)
+		bm[u>>3] |= 1 << (u & 7)
+
+		if r, ok = i.NextRune(); !ok {
+			break
+		}
+	}
+
+	return StringBitmap(bin), nil
+}
+
+type StringBitmap string
+
+const stringBitmapHeaderLen = 0 +
+	3 + // min rune
+	2 // number of elements
+
+func (x StringBitmap) Contains(r rune) bool {
+	if len(x) <= stringBitmapHeaderLen {
+		return false
+	}
+	u := uint32(r + 1 - decodeFixedRune(x[0], x[1], x[2]))
+	i := stringBitmapHeaderLen + int(u>>3)
+	// why having runtime.panicIndex is faster here???
+	return i < len(x) && 1<<(u&7)&x[i] != 0
+}
+
+func (x StringBitmap) Type() string {
+	return "string bitmap"
+}
+
+func (x StringBitmap) Pos(r rune) int32 {
+	if len(x) <= stringBitmapHeaderLen {
+		return -1
+	}
+	u := uint32(r + 1 - decodeFixedRune(x[0], x[1], x[2]))
+	i := stringBitmapHeaderLen + int(u>>3)
+	if i < len(x) && 1<<(u&7)&x[i] != 0 {
+		var pos int32
+		bm := x[stringBitmapHeaderLen : i-1]
+		for i := range bm {
+			pos += int32(ones(bm[i]))
+		}
+		mask := byte(1<<(1+u&7) - 1)
+
+		return pos + int32(ones(x[i]&mask))
+	}
+	return -1
+}
+
+func (x StringBitmap) Nth(i int32) rune {
+	if i < 0 || i >= x.RuneLen() {
+		return -1
+	}
+	r := decodeFixedRune(x[0], x[1], x[2])
+	bm := x[stringBitmapHeaderLen:]
+	for j := range bm {
+		n := int32(ones(bm[j]))
+		if n >= i {
+			r += rune(j<<3) + rune(nthBitPos(bm[j], byte(i)))
+			break
+		}
+		i -= n
+	}
+	return r
+}
+
+func (x StringBitmap) RuneLen() int32 {
+	if len(x) <= stringBitmapHeaderLen {
+		return -1
+	}
+	return int32(decodeUint16(x[3], x[4]))
+}
+
+func (x StringBitmap) Min() rune {
+	if len(x) <= stringBitmapHeaderLen {
+		return -1
+	}
+	return decodeFixedRune(x[0], x[1], x[2])
+}
+
+func (x StringBitmap) Max() rune {
+	if len(x) <= stringBitmapHeaderLen {
+		return -1
+	}
+	return decodeFixedRune(x[0], x[1], x[2]) +
+		rune((len(x)-stringBitmapHeaderLen)<<3) +
+		rune(msbPos(x[len(x)-1]))
+}
 
 // encoding utilities
 
@@ -979,11 +1193,9 @@ func decode3MSB(b byte) byte {
 }
 
 // encodeUint16 encodes a uint16 in 2 bytes with little-endian.
-func encodeUint16(c uint16) []byte {
-	return []byte{
-		byte(c),
-		byte(c >> 8),
-	}
+func encodeUint16(b *[2]byte, c uint16) {
+	b[0] = byte(c)
+	b[1] = byte(c >> 8)
 }
 
 // decodeUint16 decodes a uint16 encoded with encodeUint16.

@@ -1,7 +1,6 @@
 package runes
 
 import (
-	"fmt"
 	"io"
 	"unicode/utf8"
 )
@@ -18,40 +17,6 @@ type RuneIterator interface {
 type ResetRuneIterator[T any] interface {
 	RuneIterator
 	Reset(T)
-}
-
-// NewRangeIterator returns a [ResetRuneIterator] for [Range].
-func NewRangeIterator(r Range) ResetRuneIterator[Range] {
-	ri := new(rangeIterator)
-	ri.Reset(r)
-	return ri
-}
-
-type rangeIterator struct {
-	r        Range
-	pos, len int
-}
-
-func (r3 *rangeIterator) ReadRune() (r rune, size int, err error) {
-	if r3.pos >= r3.len {
-		return readRuneEOF()
-	}
-	r, ok := r3.r.Nth(r3.pos)
-	if !ok {
-		return 0, 0, fmt.Errorf("rune at position %d unexpectedly not found",
-			r3.pos)
-	}
-	r3.pos++
-	return readRuneReturn(r)
-}
-
-func (r3 *rangeIterator) Restart() {
-	r3.pos = 0
-}
-
-func (r3 *rangeIterator) Reset(r Range) {
-	r3.pos = 0
-	r3.len = r.Len()
 }
 
 // NewRuneSliceRuneIterator returns a [ResetRuneIterator] for slices of runes.

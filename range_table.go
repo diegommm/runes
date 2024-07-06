@@ -375,7 +375,7 @@ func (r *rangeTableSubIterator) Restart() {
 	r.rune = r.min
 }
 
-func NewRange16[T, S, U integer](min T, count S, stride U) unicode.Range16 {
+func NewRange16[T, S, U xInt](min T, count S, stride U) unicode.Range16 {
 	return unicode.Range16{
 		Lo:     uint16(min),
 		Hi:     uint16(min) + uint16(count)*uint16(stride),
@@ -398,7 +398,7 @@ func Range16Contains(r16 unicode.Range16) func(rune) bool {
 	}
 }
 
-func NewRange32[T, S, U integer](min T, count S, stride U) unicode.Range32 {
+func NewRange32[T, S, U xInt](min T, count S, stride U) unicode.Range32 {
 	return unicode.Range32{
 		Lo:     uint32(min),
 		Hi:     uint32(min) + uint32(count)*uint32(stride),

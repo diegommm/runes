@@ -29,27 +29,26 @@ func (x uniformRange5) ByteLen() (int, bool) {
 func testRangeInvariants(t *testing.T, r Range, expectedRunes []rune) {
 	t.Helper()
 
-	Len, Min, Max := r.Len(), r.Min(), r.Max()
+	Len, Min, Max := r.RuneLen(), r.Min(), r.Max()
 
 	if Len < 0 || Min < 0 || Max < 0 ||
 		Len == 0 && (Min != 0 || Max != 0) {
 		t.Fatalf("unexpected invariants: len=%v min=%v max=%v", Len, Min, Max)
 	}
 
-	if v, ok := r.Nth(0); ok != (Len > 0) || Min != v {
+	if v := r.Nth(0); (v >= 0) != (Len > 0) || Min != v {
 		t.Fatalf("unexpected invariants: len=%v min=%v first=%v", Len, Min, v)
 	}
 
-	if v, ok := r.Nth(Len - 1); ok != (Len > 0) || Max != v {
+	if v := r.Nth(Len - 1); (v >= 0) != (Len > 0) || Max != v {
 		t.Fatalf("unexpected invariants: len=%v max=%v last=%v", Len, Max, v)
 	}
 
 	runes := make([]rune, Len)
 	m := make(map[rune]struct{}, Len)
 	for i := range runes {
-		var ok bool
-		runes[i], ok = r.Nth(i)
-		if !ok {
+		runes[i] = r.Nth(int32(i))
+		if runes[i] < 0 {
 			t.Fatalf("index %d not found with len=%v", i, Len)
 		}
 		if i > 0 && runes[i] <= runes[i-1] {
