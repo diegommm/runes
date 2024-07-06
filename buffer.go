@@ -1,6 +1,6 @@
 package runes
 
-const defaultBufferSize = 512
+const defaultBufferSize = 64
 
 // errString is an `error` based on a string.
 type errString struct {
@@ -72,11 +72,12 @@ func (b *buffer) Err() error { return &errString{b.String()} }
 // String converts the given buffer into a string and returns it.
 func (b *buffer) String() string { return string(b.buf[:b.written]) }
 
-func (b *buffer) raw(v []byte) *buffer { return rawToBuffer(b, v) }
-func (b *buffer) str(v string) *buffer { return rawToBuffer(b, v) }
-func (b *buffer) int(v int) *buffer    { return writeIntToBuffer(b, v) }
-func (b *buffer) uint(v uint) *buffer  { return writeIntToBuffer(b, v) }
-func (b *buffer) rune(v rune) *buffer  { return writeIntToBuffer(b, v) }
+func (b *buffer) raw(v []byte) *buffer    { return rawToBuffer(b, v) }
+func (b *buffer) str(v string) *buffer    { return rawToBuffer(b, v) }
+func (b *buffer) int(v int) *buffer       { return writeIntToBuffer(b, v) }
+func (b *buffer) int32(v int32) *buffer   { return writeIntToBuffer(b, v) }
+func (b *buffer) uint64(v uint64) *buffer { return writeIntToBuffer(b, v) }
+func (b *buffer) rune(v rune) *buffer     { return writeIntToBuffer(b, v) }
 
 // write passes the buffer to a given bufferWriter and then returns the same
 // buffer. This methods helps chaining.
@@ -123,7 +124,7 @@ func rawsToBuffer[T interface{ string | []byte }](b *buffer, vs []T) *buffer {
 
 // intsToBuffer writes a list of integers to a buffer. Contents are enclosed in
 // square brackets and separated by a comma.
-func intsToBuffer[T integer](b *buffer, vs []T) *buffer {
+func intsToBuffer[T xInt](b *buffer, vs []T) *buffer {
 	b.byte('[')
 	for i, v := range vs {
 		if i > 0 {
@@ -143,7 +144,7 @@ func rawToBuffer[T interface{ string | []byte }](b *buffer, v T) *buffer {
 }
 
 // writeIntToBuffer writes any integer type in base 10 to a buffer.
-func writeIntToBuffer[T integer](b *buffer, v T) *buffer {
+func writeIntToBuffer[T xInt](b *buffer, v T) *buffer {
 	if v == 0 {
 		b.byte('0')
 		return b
