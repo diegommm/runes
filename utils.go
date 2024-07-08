@@ -28,19 +28,23 @@ func u32Half(a, b uint32) uint32 {
 	return uint32((uint64(a) + uint64(b)) >> 1)
 }
 
-// msbPos returns the position of the most-signigicant bit that is set in a
-// byte.
-func msbPos(b byte) byte {
+// leadingOnePos returns the position of the most-signigicant bit that is set in
+// a byte.
+func leadingOnePos(b byte) byte {
 	var r byte
-	if b > 15 {
+	if b > 1<<4-1 {
 		r += 4
 		b >>= 4
 	}
-	if b > 3 {
+	if b > 1<<2-1 {
 		r += 2
 		b >>= 2
 	}
-	return r + b>>1
+	if b > 1<<1-1 {
+		r++
+		b >>= 1
+	}
+	return r + b
 }
 
 // ones returns the number of bits set in a byte.
@@ -50,14 +54,14 @@ func ones(b byte) byte {
 		((b >> 3) & 1) + ((b >> 2) & 1) + ((b >> 1) & 1) + (b & 1)
 }
 
-// nthBitPos returns the position of the n-th bit set in the given byte, or zero
+// nthOnePos returns the position of the n-th one set in the given byte, or zero
 // if the bit is not found.
-func nthBitPos(b, n byte) byte {
+func nthOnePos(b, n byte) byte {
 	for i := byte(0); i < 8; i++ {
 		if b&(1<<i) != 0 {
 			n--
 			if n == 0 {
-				return i
+				return i + 1
 			}
 		}
 	}

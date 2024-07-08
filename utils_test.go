@@ -2,7 +2,9 @@ package runes
 
 import (
 	"fmt"
+	"math/bits"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -161,12 +163,38 @@ func seq[T xInt](from, to T, extra ...T) []T {
 	for i := from; i <= to; i++ {
 		s = append(s, i)
 	}
-	return append(s, extra...)
+	s = append(s, extra...)
+	slices.Sort(s)
+	return s
 }
 
 func True(t *testing.T, ok bool) {
 	t.Helper()
 	if !ok {
 		t.Fatalf("unexpected false value")
+	}
+}
+
+func TestOnes(t *testing.T) {
+	t.Parallel()
+
+	for i := 0; i < 256; i++ {
+		b := byte(i)
+		if int(ones(b)) != bits.OnesCount8(b) {
+			t.Fatalf("failed for %v", b)
+		}
+	}
+}
+
+func TestMSBPos(t *testing.T) {
+	t.Parallel()
+
+	for i := 0; i < 256; i++ {
+		b := byte(i)
+		expected := 8 - bits.LeadingZeros8(b)
+		actual := int(leadingOnePos(b))
+		if expected != actual {
+			t.Fatalf("byte: %v, expected: %v, actual: %v", b, expected, actual)
+		}
 	}
 }

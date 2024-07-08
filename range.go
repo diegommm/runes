@@ -59,8 +59,6 @@ func SortRangeFunc[R Range](a, b R) int {
 	}
 }
 
-// TODO: add "Sorted" and check for sorting in Overlap as well
-
 // Overlap returns wheter the given ranges overlap, and the first pair of them
 // that do, in sorted order. The ranges themselves are expected to be sorted in
 // ascending order.
@@ -143,8 +141,6 @@ func NewOneValueRange[R OneValueRange](r rune) R {
 		*ptr = OneValueRange3(runeBytes)
 	case *OneValueRange4:
 		*ptr = OneValueRange4([1]rune{r})
-	default:
-		panic("NewOneValueRange: unexpected type")
 	}
 	return ret
 }
@@ -177,11 +173,8 @@ func (x oneValueRange124[T]) Type() string {
 		return "single rune stored in 1 byte"
 	case uint16:
 		return "single rune stored in 2 bytes"
-	case rune:
-		return "single rune stored in 4 bytes"
-	default:
-		panic("unknown type")
 	}
+	return "single rune stored in 4 bytes"
 }
 
 func (x oneValueRange124[T]) Pos(r rune) int32 {
@@ -431,10 +424,18 @@ func (x RuneListRangeBinary[R]) Min() rune            { return rangeSliceMin(x) 
 func (x RuneListRangeBinary[R]) Max() rune            { return rangeSliceMax(x) }
 
 // ExceptionRange returns a [Range] that is exactly the same as `m`, except for
-// the items in `x`, whose items must be a subset of `m` and not match x.Min()
-// nor x.Max().
-func ExceptionRange[M, X Range](match M, except X) Range {
-	return exceptionRange[M, X]{match, except}
+// the items in `x`, which must be non-empty and interior to `m`. That is: (1)
+// the items of `x` are also items of `m`; (2) `x` does not contain `m.Min()`
+// nor `m.Max()`; and (3) `x` contains at least one item. Only boundaries are
+// checked to prevent obvious bugs, it is the caller's responsibility to provide
+// correct arguments, since checking every value of `x` could be very expensive.
+func ExceptionRange[M, X Range](m M, x X) (exceptionRange[M, X], error) {
+	if m.Min() >= x.Min() || m.Max() <= x.Max() ||
+		m.RuneLen()-2 <= x.RuneLen() {
+		return exceptionRange[M, X]{}, &errString{"invalid exception range"}
+	}
+
+	return exceptionRange[M, X]{m, x}, nil
 }
 
 type exceptionRange[M, X Range] struct {
@@ -459,11 +460,7 @@ func (x exceptionRange[M, X]) Pos(r rune) int32 {
 	if mPos < xStartPos {
 		return mPos
 	}
-	xLen := x.x.RuneLen()
-	if mPos < xStartPos+xLen {
-		return -1
-	}
-	return mPos - xLen
+	return mPos - x.x.RuneLen()
 }
 
 func (x exceptionRange[M, X]) Nth(i int32) rune {
@@ -472,7 +469,7 @@ func (x exceptionRange[M, X]) Nth(i int32) rune {
 		return -1
 	}
 	if xStartPos := x.m.Nth(x.x.Min()); i >= xStartPos {
-		return x.m.Nth(i - xStartPos)
+		return x.m.Nth(i + xLen)
 	}
 	return x.m.Nth(i)
 }
@@ -523,6 +520,8 @@ func NewRangeList[R Range](rs ...R) (Range, error) {
 
 // twoRange saves 7 words and is faster than bsRange. Its elements must be
 // sorted and non-overlapping.
+//
+// TODO: remove???
 type twoRange[R Range] [2]R
 
 func (x twoRange[R]) Contains(r rune) bool {
@@ -721,16 +720,49 @@ func NewUniformRange5(minRune rune, runeCount uint16, stride byte) (uniformRange
 	}, nil
 }
 
+// NewUniformRange68 returs a [Range] that contains `runeCount` runes, starting
+// with `minRune`. Consecutive runes in the returned Range are uniformly spaced
+// every `stride` rune values, with a minimum of one. One in `stride` means the
+// range contains all runes starting at `minRune` until `minRune`+`runeCount`-1;
+// two means every other rune starting at `minRune` for `runeCount`, etc. The
+// returned value is fixed at 6 or 8 bytes bytes depending if the type parameter
+// is uint16 or rune, respectively. It has near-constant performance, regardless
+// of the parameters, and performs around ~3 times better than NewUniformRange5.
+func NewUniformRange68[T interface{ uint16 | rune }](minRune T, runeCount, stride uint16) (uniformRange68[T], error) {
+	if runeCount < 2 {
+		return uniformRange68[T]{},
+			&errString{"NewUniformRange68: runeCount must be greater than 1"}
+	}
+	if stride < 2 {
+		return uniformRange68[T]{},
+			&errString{"NewUniformRange68: stride must be greater than 2"}
+	}
+
+	return uniformRange68[T]{
+		min:    minRune,
+		count:  runeCount,
+		stride: stride,
+	}, nil
+}
+
+// TODO: Add NewDynamicUniformRange.
+
+// uniformRange5 can represent a uniformly repeating pattern of runes starting
+// at any valid rune, with a stride in the range [2, 8] (more than enough for
+// all reasonable cases), and up to 65535 runes in total.
 type uniformRange5 [5]byte
 
 func (x uniformRange5) Contains(r rune) bool {
-	u := uint32(r - x.Min())
-	s := uint32(decode3MSB(x[2]) + 2)
-	c := uint32(decodeUint16(x[3], x[4]))
-	if s < 2 {
-		return u < c
-	}
-	return u < s*c && u%s == 0
+	u := uint32(r - decodeFixedRune(x[0], x[1], x[2]))
+	s := uint32(decode3MSB(x[2])) + 2
+	// for 32 bit systems that do not have modulo, the following can be
+	// expressed as:
+	//	if s == 0 {
+	//		return false
+	//	}
+	//	q := u / s
+	//	return u-q*s == 0 && q < uint32(decodeUint16(x[3], x[4]))
+	return s != 0 && u%s == 0 && u < s*uint32(decodeUint16(x[3], x[4]))
 }
 
 func (x uniformRange5) Type() string {
@@ -740,7 +772,7 @@ func (x uniformRange5) Type() string {
 func (x uniformRange5) Pos(r rune) int32 {
 	u := uint32(r - x.Min())
 	s := uint32(decode3MSB(x[2]) + 2)
-	if s > 0 && u%s == 0 && u < s*uint32(decodeUint16(x[3], x[4])) {
+	if s != 0 && u%s == 0 && u < s*uint32(decodeUint16(x[3], x[4])) {
 		return int32(u / s)
 	}
 	return -1
@@ -776,36 +808,6 @@ func (x uniformRange5) writeToBuffer(b *buffer) {
 }
 
 func (x uniformRange5) GoString() string { return bufferString(x) }
-
-// NewUniformRange68 returs a [Range] that contains `runeCount` runes, starting
-// with `minRune`. Consecutive runes in the returned Range are uniformly spaced
-// every `stride` rune values, with a minimum of one. One in `stride` means the
-// range contains all runes starting at `minRune` until `minRune`+`runeCount`-1;
-// two means every other rune starting at `minRune` for `runeCount`, etc. The
-// returned value is fixed at 6 or 8 bytes bytes depending if the type parameter
-// is uint16 or rune, respectively. It has near-constant performance, regardless
-// of the parameters, and performs around ~3 times better than NewUniformRange5.
-func NewUniformRange68[T interface{ uint16 | rune }](minRune T, runeCount, stride uint16) (uniformRange68[T], error) {
-	if runeCount < 2 {
-		return uniformRange68[T]{},
-			&errString{"NewUniformRange68: runeCount must be greater than 1"}
-	}
-	if stride < 2 {
-		return uniformRange68[T]{},
-			&errString{"NewUniformRange68: stride must be greater than 2"}
-	}
-	if runeCount == 1 {
-		// stride > 1 here is acceptable but unnecessary. We set it to zero for
-		// consistency
-		stride = 1
-	}
-
-	return uniformRange68[T]{
-		min:    minRune,
-		count:  runeCount,
-		stride: stride,
-	}, nil
-}
 
 type uniformRange68[T interface{ uint16 | rune }] struct {
 	min    T
@@ -860,91 +862,99 @@ func (x uniformRange68[T]) RuneLen() int32   { return int32(x.count) }
 func (x uniformRange68[T]) Min() rune        { return rune(x.min) }
 func (x uniformRange68[T]) GoString() string { return bufferString(x) }
 
-// NewStringBitmapRange ...
-func NewStringBitmapRange(i Iterator) (StringBitmap, error) {
-	minRune, ok := i.NextRune() // get minRune
-	if !ok {
+// NewBitmapRange returns a [Range] that efficiently compresses a contiguous
+// space of runes where any one of them may be part of the range itself. This is
+// ideal for patchy distributions of runes that are hard to model. It's Contains
+// method is one of the fastests, and runs in constant time. It is best suited
+// to cover ranges with either a relatively small RuneLen, or a bigger RuneLen
+// but with a rather high rune density (i.e. `(Max+1-Min)/RuneLen`), somewhere
+// around (0.5, 1).
+func NewBitmapRange(i Iterator) (stringBitmap, error) {
+	count := i.RuneLen()
+	if count < 1 {
 		return "", nil
 	}
-	numEls := uint64(i.Max() + 1 - minRune)
-	if numEls < 0 || numEls > maxUint16 {
-		return "", newBuffer().uint64(numEls).
+	if count > maxUint16 {
+		return "", newBuffer().int32(count).
 			str(" exceeds maximum number of elements: ").
 			uint64(maxUint16).
 			Err()
 	}
 
 	// allocate for the whole string
-	bin := make([]byte, stringBitmapHeaderLen+ceilDiv(numEls, 8))
+	minRune, _ := i.NextRune() // get minRune
+	span := uint32(i.Max() + 2 - minRune)
+	bin := make([]byte, stringBitmapHeaderLen+ceilDiv(span, 8))
 
 	// encode header
 	encodeFixedRune((*[3]byte)(bin), minRune)
-	encodeUint16((*[2]byte)(bin[3:]), uint16(numEls))
+	encodeUint16((*[2]byte)(bin[3:]), uint16(count))
 
 	// build the bitmap
-	r := minRune
 	bm := bin[stringBitmapHeaderLen:]
-	for {
-		u := uint32(r + 1 - minRune)
+	for r, ok := minRune, true; ok; r, ok = i.NextRune() {
+		u := uint32(r - minRune)
 		bm[u>>3] |= 1 << (u & 7)
-
-		if r, ok = i.NextRune(); !ok {
-			break
-		}
 	}
 
-	return StringBitmap(bin), nil
+	return stringBitmap(bin), nil
 }
 
-type StringBitmap string
+type stringBitmap string
 
 const stringBitmapHeaderLen = 0 +
-	3 + // min rune
-	2 // number of elements
+	3 + // Min()
+	2 // RuneLen()
 
-func (x StringBitmap) Contains(r rune) bool {
+func (x stringBitmap) Contains(r rune) bool {
 	if len(x) <= stringBitmapHeaderLen {
 		return false
 	}
-	u := uint32(r + 1 - decodeFixedRune(x[0], x[1], x[2]))
+	u := uint32(r - decodeFixedRune(x[0], x[1], x[2]))
 	i := stringBitmapHeaderLen + int(u>>3)
 	// why having runtime.panicIndex is faster here???
 	return i < len(x) && 1<<(u&7)&x[i] != 0
 }
 
-func (x StringBitmap) Type() string {
+func (x stringBitmap) Type() string {
 	return "string bitmap"
 }
 
-func (x StringBitmap) Pos(r rune) int32 {
+func (x stringBitmap) Pos(r rune) int32 {
 	if len(x) <= stringBitmapHeaderLen {
 		return -1
 	}
-	u := uint32(r + 1 - decodeFixedRune(x[0], x[1], x[2]))
+	u := uint32(r - decodeFixedRune(x[0], x[1], x[2]))
 	i := stringBitmapHeaderLen + int(u>>3)
 	if i < len(x) && 1<<(u&7)&x[i] != 0 {
 		var pos int32
-		bm := x[stringBitmapHeaderLen : i-1]
-		for i := range bm {
-			pos += int32(ones(bm[i]))
+		bm := x[stringBitmapHeaderLen:i]
+		for j := range bm {
+			pos += int32(ones(bm[j])) // add the number of bits found
 		}
-		mask := byte(1<<(1+u&7) - 1)
 
-		return pos + int32(ones(x[i]&mask))
+		// build a custom mask that clears all the higher bits from the
+		// byte-sized bitmap, leaving our rune's bit as if it was the leading
+		// one
+		mask := (1<<(u&7)&x[i]-1)<<1 + 1
+
+		return pos +
+			int32(ones(x[i]&mask)) - 1 // pos within byte
 	}
 	return -1
 }
 
-func (x StringBitmap) Nth(i int32) rune {
+func (x stringBitmap) Nth(i int32) rune {
 	if i < 0 || i >= x.RuneLen() {
 		return -1
 	}
-	r := decodeFixedRune(x[0], x[1], x[2])
+	r := decodeFixedRune(x[0], x[1], x[2]) // Min()
 	bm := x[stringBitmapHeaderLen:]
 	for j := range bm {
 		n := int32(ones(bm[j]))
-		if n >= i {
-			r += rune(j<<3) + rune(nthBitPos(bm[j], byte(i)))
+		if n > i {
+			r += rune(j<<3) + // offset
+				rune(nthOnePos(bm[j], byte(i+1))) - 1 // pos within byte
 			break
 		}
 		i -= n
@@ -952,25 +962,25 @@ func (x StringBitmap) Nth(i int32) rune {
 	return r
 }
 
-func (x StringBitmap) RuneLen() int32 {
+func (x stringBitmap) RuneLen() int32 {
 	if len(x) <= stringBitmapHeaderLen {
 		return 0
 	}
 	return int32(decodeUint16(x[3], x[4]))
 }
 
-func (x StringBitmap) Min() rune {
+func (x stringBitmap) Min() rune {
 	if len(x) <= stringBitmapHeaderLen {
 		return -1
 	}
 	return decodeFixedRune(x[0], x[1], x[2])
 }
 
-func (x StringBitmap) Max() rune {
+func (x stringBitmap) Max() rune {
 	if len(x) <= stringBitmapHeaderLen {
 		return -1
 	}
-	return decodeFixedRune(x[0], x[1], x[2]) +
-		rune((len(x)-stringBitmapHeaderLen)<<3) +
-		rune(msbPos(x[len(x)-1]))
+	return decodeFixedRune(x[0], x[1], x[2]) + // Min()
+		rune(len(x)-stringBitmapHeaderLen-1)<<3 + // offset
+		rune(leadingOnePos(x[len(x)-1])) - 1 // highest bit set
 }

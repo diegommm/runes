@@ -139,6 +139,9 @@ func TestSimpleRange(t *testing.T) {
 	run("OneValueRange4", func(from, to rune) Range {
 		return Must(NewSimpleRange[OneValueRange4](from, to))
 	}, testCases34)
+
+	_, err := NewSimpleRange[OneValueRange1](1, 0)
+	True(t, err != nil)
 }
 
 func TestNewDynamicSimpleRange(t *testing.T) {
@@ -268,8 +271,34 @@ func TestNewDynamicRuneListRange(t *testing.T) {
 	True(t, ok)
 }
 
+func TestExceptionRange(t *testing.T) {
+	t.Parallel()
+
+	one10 := Must(NewDynamicSimpleRange(1, 10))
+	zero100 := Must(NewDynamicSimpleRange(0, 100))
+
+	test.RangeInvariantTestCases{
+		{"[0,100] except 1",
+			Must(ExceptionRange(zero100, NewDynamicOneValueRange(1))),
+			seq[rune](2, 100, 0)},
+		{"[0,100] except [1,10]",
+			Must(ExceptionRange(zero100, one10)),
+			seq[rune](11, 100, 0)},
+	}.Run(t)
+
+	_, err := ExceptionRange(one10, EmptyRange)
+	True(t, err != nil)
+	_, err = ExceptionRange(zero100, NewDynamicOneValueRange(0))
+	True(t, err != nil)
+	_, err = ExceptionRange(one10, zero100)
+	True(t, err != nil)
+}
+
 func TestUniformRange(t *testing.T) {
 	t.Parallel()
+
+	// 5 bytes uniform range
+
 	test.RangeInvariantTestCases{
 		{"1 each 2", Must(NewUniformRange5(0, 2, 2)), []rune{0, 2}},
 		{"1 each 2", Must(NewUniformRange5(3, 2, 2)), []rune{3, 5}},
@@ -277,4 +306,60 @@ func TestUniformRange(t *testing.T) {
 		{"3 each 5", Must(NewUniformRange5(3, 3, 5)), []rune{3, 8, 13}},
 		{"3 each 7", Must(NewUniformRange5(31, 3, 7)), []rune{31, 38, 45}},
 	}.Run(t)
+
+	_, err := NewUniformRange5(0, 1, 2)
+	True(t, err != nil)
+	_, err = NewUniformRange5(0, 2, 1)
+	True(t, err != nil)
+
+	// 6 bytes uniform range
+
+	test.RangeInvariantTestCases{
+		{"1 each 2", Must(NewUniformRange68[uint16](0, 2, 2)), []rune{0, 2}},
+		{"1 each 2", Must(NewUniformRange68[uint16](3, 2, 2)), []rune{3, 5}},
+		{"3 each 2", Must(NewUniformRange68[uint16](3, 3, 2)), []rune{3, 5, 7}},
+		{"3 each 5", Must(NewUniformRange68[uint16](3, 3, 5)), []rune{3, 8, 13}},
+		{"3 each 7", Must(NewUniformRange68[uint16](31, 3, 7)), []rune{31, 38, 45}},
+	}.Run(t)
+
+	_, err = NewUniformRange68[uint16](0, 1, 2)
+	True(t, err != nil)
+	_, err = NewUniformRange68[uint16](0, 2, 1)
+	True(t, err != nil)
+
+	// 8 bytes uniform range
+
+	test.RangeInvariantTestCases{
+		{"1 each 2", Must(NewUniformRange68[rune](0, 2, 2)), []rune{0, 2}},
+		{"1 each 2", Must(NewUniformRange68[rune](3, 2, 2)), []rune{3, 5}},
+		{"3 each 2", Must(NewUniformRange68[rune](3, 3, 2)), []rune{3, 5, 7}},
+		{"3 each 5", Must(NewUniformRange68[rune](3, 3, 5)), []rune{3, 8, 13}},
+		{"3 each 7", Must(NewUniformRange68[rune](31, 3, 7)), []rune{31, 38, 45}},
+	}.Run(t)
+
+	_, err = NewUniformRange68[rune](0, 1, 2)
+	True(t, err != nil)
+	_, err = NewUniformRange68[rune](0, 2, 1)
+	True(t, err != nil)
+}
+
+func TestBitmapRange(t *testing.T) {
+	t.Parallel()
+	testCases := [][]rune{
+		{},
+		{0},
+		{0, 5, 6},
+		{1, 6, 7, 9},
+		{0, 1, 5, 7, 90, 213, 256, 257, 258, 259, 1024},
+		{11, maxUint16, maxUint16 + 10, maxUint16 + 34, maxUint16 + 98},
+		seq[rune](100, 500),
+	}
+
+	for i, tc := range testCases {
+		test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
+			fmt.Sprintf("%d", i),
+			Must(NewBitmapRange(RunesIterator(tc))),
+			tc,
+		})
+	}
 }

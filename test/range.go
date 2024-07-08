@@ -2,7 +2,6 @@ package test
 
 import (
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/diegommm/runes/iface"
@@ -102,8 +101,9 @@ func TestRangeInvariants(t *testing.T, tc *RangeInvariantTestCase) {
 		m := make(map[rune]struct{}, Len)
 		for i := range runes {
 			runes[i] = tc.Range.Nth(int32(i))
-			if runes[i] < 0 {
-				t.Fatalf("index %d not found with len=%v", i, Len)
+			if runes[i] != tc.Runes[i] {
+				t.Fatalf("at index: %d, expected: %v, actual: %v", i,
+					tc.Runes[i], runes[i])
 			}
 			if pos := tc.Range.Pos(runes[i]); int(pos) != i {
 				t.Fatalf("expected position: %d, actual: %d", i, pos)
@@ -113,11 +113,6 @@ func TestRangeInvariants(t *testing.T, tc *RangeInvariantTestCase) {
 					"previous rune %v", runes[i], i, runes[i-1])
 			}
 			m[runes[i]] = struct{}{}
-		}
-
-		if !slices.Equal(tc.Runes, runes) {
-			t.Fatalf("mismatched runes:\n\texpected: %v\n\t  actual: %v",
-				tc.Runes, runes)
 		}
 
 		for i, rr := range runes {
