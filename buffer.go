@@ -50,8 +50,7 @@ func bufferString(w bufferWriter) string {
 // concurrent use and its internals should not be directly accessed in other
 // files.
 type buffer struct {
-	buf     []byte
-	written int
+	buf []byte
 }
 
 // newBufferLen returns a new buffer with an initial length of `n`.
@@ -70,13 +69,14 @@ func newBuffer() *buffer {
 func (b *buffer) Err() error { return &errString{b.String()} }
 
 // String converts the given buffer into a string and returns it.
-func (b *buffer) String() string { return string(b.buf[:b.written]) }
+func (b *buffer) String() string { return string(b.buf) }
 
 func (b *buffer) raw(v []byte) *buffer    { return rawToBuffer(b, v) }
 func (b *buffer) str(v string) *buffer    { return rawToBuffer(b, v) }
 func (b *buffer) int(v int) *buffer       { return writeIntToBuffer(b, v) }
 func (b *buffer) int32(v int32) *buffer   { return writeIntToBuffer(b, v) }
 func (b *buffer) uint64(v uint64) *buffer { return writeIntToBuffer(b, v) }
+func (b *buffer) int64(v int64) *buffer   { return writeIntToBuffer(b, v) }
 func (b *buffer) rune(v rune) *buffer     { return writeIntToBuffer(b, v) }
 
 // write passes the buffer to a given bufferWriter and then returns the same
@@ -88,23 +88,7 @@ func (b *buffer) write(w bufferWriter) *buffer {
 
 // byte writes a raw byte to a buffer.
 func (b *buffer) byte(v byte) *buffer {
-	b.buf = append(b.buf[b.written:], v)
-	b.written++
-	return b
-}
-
-// writersToBuffer calls each of the bufferWriter for the given buffer. The
-// contents that each one generate are separated by a comma, and square brackets
-// enclose the whole result.
-func writersToBuffer[T bufferWriter](b *buffer, vs []T) *buffer {
-	b.byte('[')
-	for i, v := range vs {
-		if i > 0 {
-			b.byte(',')
-		}
-		b.write(v)
-	}
-	b.byte(']')
+	b.buf = append(b.buf, v)
 	return b
 }
 
@@ -138,8 +122,7 @@ func intsToBuffer[T xInt](b *buffer, vs []T) *buffer {
 
 // rawToBuffer writes raw bytes to a buffer.
 func rawToBuffer[T interface{ string | []byte }](b *buffer, v T) *buffer {
-	b.buf = append(b.buf[b.written:], v...)
-	b.written += len(v)
+	b.buf = append(b.buf, v...)
 	return b
 }
 
@@ -150,9 +133,14 @@ func writeIntToBuffer[T xInt](b *buffer, v T) *buffer {
 		return b
 	}
 
+	u := uint64(v)
+	if v < 0 {
+		u = uint64(-v)
+	}
+
 	var buf [20]byte // max string len of any int including sign in base 10
 	i := len(buf) - 1
-	for u := uint64(v); i >= 0 && u > 0; i-- {
+	for ; i >= 0 && u > 0; i-- {
 		buf[i] = '0' + byte(u%10)
 		u /= 10
 	}
@@ -162,7 +150,7 @@ func writeIntToBuffer[T xInt](b *buffer, v T) *buffer {
 		i--
 	}
 
-	b.raw(buf[i:])
+	b.raw(buf[i+1:])
 
 	return b
 }
