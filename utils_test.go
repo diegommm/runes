@@ -1,165 +1,49 @@
 package runes
 
 import (
-	"fmt"
 	"math/bits"
-	"runtime"
 	"slices"
-	"strings"
 	"testing"
-	"unicode/utf8"
-	"unsafe"
-
-	"github.com/diegommm/runes/test"
 )
 
-const (
-	SurrogateMin = 0xD800 // first rune of surrogate range
-	SurrogateMax = 0xDFFF // last rune of surrogate range
-)
+const maxUint32 = 1<<32 - 1
 
-type WithByteLen interface {
-	ByteLen() (l int, exact bool)
-}
-
-func EstimateByteLen[T any](t T) (_ int, exact bool) {
-	if v, _ := any(t).(WithByteLen); v != nil {
-		return v.ByteLen()
-	}
-	return int(unsafe.Sizeof(t)), false
-}
-
-func runRuneTest(t *testing.T, parallelism uint, f func(*testing.T, rune)) {
-	t.Helper()
-
-	if parallelism == 0 {
-		parallelism = uint(runtime.GOMAXPROCS(0))
-	}
-
-	if testing.Short() {
-		for _, tc := range test.RuneCases {
-			t.Run(fmt.Sprintf("rune=%v", tc.Rune), func(t *testing.T) {
-				f(t, tc.Rune)
-			})
+func withoutErr[T any](v T, err error) func(*testing.T) T {
+	return func(t *testing.T) T {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		return
-	}
-
-	partLen := 1 + (1<<32-1)/int64(parallelism)
-	for i := uint(0); i < parallelism; i++ {
-		first := int64(i) * partLen
-		last := min(first+partLen-1, (1<<32 - 1))
-
-		t.Run(fmt.Sprintf("[%v,%v]", rune(first), rune(last)), func(t *testing.T) {
-			t.Parallel()
-			for j := first; j <= last; j++ {
-				f(t, rune(j))
-			}
-		})
+		return v
 	}
 }
 
-type runeIterator struct {
-	Rune    rune
-	last    rune
-	started bool
-}
-
-func newRuneIterator(first, last rune) *runeIterator {
-	return &runeIterator{
-		Rune: first,
-		last: last,
+func shouldErr[T any](_ T, err error) func(*testing.T) {
+	return func(t *testing.T) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("expected error")
+		}
 	}
 }
 
-func (i *runeIterator) Next() bool {
-	if i.Rune >= i.last {
-		return false
-	}
-	if !i.started {
-		i.started = true
-		return true
-	}
-	i.Rune++
-	return true
-}
-
-type validRuneIterator struct {
-	*runeIterator
-}
-
-func newValidRuneIterator() validRuneIterator {
-	return validRuneIterator{
-		runeIterator: newRuneIterator(0, utf8.MaxRune),
+func shouldType[T any](v any) func(*testing.T) {
+	return func(t *testing.T) {
+		t.Helper()
+		x, ok := v.(T)
+		if !ok {
+			t.Fatalf("expected type %T, got %T", x, v)
+		}
 	}
 }
 
-func (i validRuneIterator) Next() bool {
-	if i.Rune == SurrogateMin-1 {
-		i.Rune = SurrogateMax + 1
-		return true
-	}
-	return i.runeIterator.Next()
-}
-
-type invalidRuneIterator struct {
-	*runeIterator
-}
-
-func newInvalidRuneIterator() invalidRuneIterator {
-	return invalidRuneIterator{
-		runeIterator: newRuneIterator(-(1 << 31), 1<<31-1),
-	}
-}
-
-func (i invalidRuneIterator) Next() bool {
-	switch i.Rune {
-	case -1:
-		i.Rune = SurrogateMin
-		return true
-	case SurrogateMax:
-		i.Rune = utf8.MaxRune + 1
-		return true
-	default:
-		return i.runeIterator.Next()
-	}
-}
-
-func validRuneSlice(start, count rune) []rune {
-	if count < 1 {
-		panic("count must be positive")
-	}
-	end := start + count
-	if !utf8.ValidRune(start) || !utf8.ValidRune(end) {
-		panic("invalid position")
-	}
-	l := count
-	if start < SurrogateMin && end >= SurrogateMin {
-		l -= SurrogateMax - SurrogateMin
-	}
-	ret := make([]rune, 0, l)
-	i := newValidRuneIterator()
-	i.Rune = start
-	for i.Next() && i.Rune < end {
-		ret = append(ret, i.Rune)
-	}
-	return ret
-}
-
-func makeContiguousRunesString(start, count rune) string {
-	var b strings.Builder
-	b.Grow(int(count)) // could be bigger, nvm
-	for i := rune(0); i < count; i++ {
-		b.WriteRune(start + i)
-	}
-	return b.String()
-}
-
-func seq[T xInt](from, to T, extra ...T) []T {
+// seq generates an inclusive sequence of runes starting at `start` and ending
+// in `end`. If given, the runes in `extra` are later added and the final slice
+// is returned sorted in ascending order.
+func seq(from, to rune, extra ...rune) []rune {
 	if from > to {
 		panic("from cannot be greater than to")
 	}
-	s := make([]T, 0, to+1-from+T(len(extra)))
+	s := make([]rune, 0, to+1-from+rune(len(extra)))
 	for i := from; i <= to; i++ {
 		s = append(s, i)
 	}
@@ -168,16 +52,51 @@ func seq[T xInt](from, to T, extra ...T) []T {
 	return s
 }
 
-func True(t *testing.T, ok bool) {
-	t.Helper()
-	if !ok {
-		t.Fatalf("unexpected false value")
+func TestCeilDiv(t *testing.T) {
+	testCases := []struct {
+		dividend, divisor, expected uint32
+	}{
+		{0, 1, 0},
+		{2, 1, 2},
+		{1023, 1024, 1},
+		{1024, 1024, 1},
+		{1025, 1024, 2},
+		{maxUint32, maxUint32, 1},
+	}
+
+	for _, tc := range testCases {
+		actual := ceilDiv(tc.dividend, tc.divisor)
+		if tc.expected != actual {
+			t.Errorf("ceilDiv(%d, %d)=%d, expected=%d", tc.dividend, tc.divisor,
+				actual, tc.expected)
+		}
+	}
+}
+
+func TestU32Mid(t *testing.T) {
+	testCases := []struct {
+		a, b, expected uint32
+	}{
+		{0, 0, 0},
+		{1, 0, 0},
+		{0, 1, 0},
+		{1, 1, 1},
+		{1000, 2000, 1500},
+		{1001, 2000, 1500},
+		{1000, 2001, 1500},
+		{0, maxUint32, 1<<31 - 1},
+	}
+
+	for _, tc := range testCases {
+		actual := u32Mid(tc.a, tc.b)
+		if tc.expected != actual {
+			t.Errorf("u32Mid(%d, %d)=%d, expected=%d", tc.a, tc.b, actual,
+				tc.expected)
+		}
 	}
 }
 
 func TestOnes(t *testing.T) {
-	t.Parallel()
-
 	for i := 0; i < 256; i++ {
 		b := byte(i)
 		if int(ones(b)) != bits.OnesCount8(b) {
@@ -187,14 +106,71 @@ func TestOnes(t *testing.T) {
 }
 
 func TestMSBPos(t *testing.T) {
-	t.Parallel()
-
 	for i := 0; i < 256; i++ {
 		b := byte(i)
 		expected := 8 - bits.LeadingZeros8(b)
 		actual := int(leadingOnePos(b))
 		if expected != actual {
 			t.Fatalf("byte: %v, expected: %v, actual: %v", b, expected, actual)
+		}
+	}
+}
+
+func TestNthOnePos(t *testing.T) {
+	// map from `b` to the result for each value of `n`, adding 1 to the array
+	// index
+	testCases := map[byte][8]byte{
+		0b00000000: {},
+
+		0b00000001: {1},
+		0b10000000: {8},
+		0b00001000: {4},
+
+		0b10000001: {1, 8},
+		0b00000011: {1, 2},
+		0b00101000: {4, 6},
+
+		0b10101010: {2, 4, 6, 8},
+		0b01010101: {1, 3, 5, 7},
+
+		0b11111111: {1, 2, 3, 4, 5, 6, 7, 8},
+	}
+
+	for b, res := range testCases {
+		if got := nthOnePos(b, 0); got != 0 {
+			t.Errorf("b=0b%08b, n=%d, got=%d, exp=0", b, 0, got)
+		}
+		if got := nthOnePos(b, 9); got != 0 {
+			t.Errorf("b=0b%08b, n=%d, got=%d, exp=0", b, 9, got)
+		}
+		for n := byte(1); n <= 8; n++ {
+			exp := res[n-1]
+			got := nthOnePos(b, n)
+			if exp != got {
+				t.Errorf("b=0b%08b, n=%d, got=%d, exp=%d", b, n, got, exp)
+			}
+		}
+	}
+}
+
+func TestRemoveAtIndex(t *testing.T) {
+	testCases := []struct {
+		input    []rune
+		idx      int
+		expected []rune
+	}{
+		{},
+		{seq(1, 10), 0, seq(2, 10)},
+		{seq(1, 10), 1, seq(3, 10, 1)},
+		{seq(1, 10), 8, seq(1, 8, 10)},
+		{seq(1, 10), 9, seq(1, 9)},
+	}
+
+	for i, tc := range testCases {
+		removeAtIndex(&tc.input, tc.idx)
+		if !slices.Equal(tc.expected, tc.input) {
+			t.Fatalf("[%d]\nexpected: %v\n  actual: %v", i, tc.expected,
+				tc.input)
 		}
 	}
 }

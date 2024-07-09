@@ -1,46 +1,47 @@
 package runes
 
-func Must[T any](v T, err error) T {
-	if err != nil {
-		panic(err)
-	}
-	return v
-}
-
+// sInt is all the native signed integer types.
 type sInt interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64
 }
 
+// uInt is all the native unsigned integer types.
 type uInt interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
 		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
 }
 
+// xInt is all the native integer types.
 type xInt interface {
 	sInt | uInt
 }
 
-func ceilDiv[T xInt](dividend, divisor T) T {
-	return (dividend + divisor - 1) / divisor
+// ceilDiv performs the integer division of two uint32, rounding to the next
+// (bigger) integer.
+func ceilDiv(dividend, divisor uint32) uint32 {
+	return uint32((uint64(dividend) + uint64(divisor) - 1) / uint64(divisor))
 }
 
-func u32Half(a, b uint32) uint32 {
+// u32Mid returns the number in the middle of two uint32.
+func u32Mid(a, b uint32) uint32 {
 	return uint32((uint64(a) + uint64(b)) >> 1)
 }
 
 // leadingOnePos returns the position of the most-signigicant bit that is set in
 // a byte.
 func leadingOnePos(b byte) byte {
+	// we can afford computing the value since it's not used in any path related
+	// to any `Contains`
 	var r byte
-	if b > 1<<4-1 {
+	if b > 1<<4-1 { // > 15
 		r += 4
 		b >>= 4
 	}
-	if b > 1<<2-1 {
+	if b > 1<<2-1 { // > 3
 		r += 2
 		b >>= 2
 	}
-	if b > 1<<1-1 {
+	if b > 1<<1-1 { // > 1
 		r++
 		b >>= 1
 	}
@@ -49,14 +50,18 @@ func leadingOnePos(b byte) byte {
 
 // ones returns the number of bits set in a byte.
 func ones(b byte) byte {
+	// we can afford computing the value since it's not used in any path related
+	// to any `Contains`
 	return 0 +
 		((b >> 7) & 1) + ((b >> 6) & 1) + ((b >> 5) & 1) + ((b >> 4) & 1) +
 		((b >> 3) & 1) + ((b >> 2) & 1) + ((b >> 1) & 1) + (b & 1)
 }
 
-// nthOnePos returns the position of the n-th one set in the given byte, or zero
-// if the bit is not found.
+// nthOnePos returns the position of the n-th one in the given byte counting
+// from the LSB, or zero if the bit is not found.
 func nthOnePos(b, n byte) byte {
+	// we can afford computing the value since it's not used in any path related
+	// to any `Contains`
 	for i := byte(0); i < 8; i++ {
 		if b&(1<<i) != 0 {
 			n--
@@ -68,7 +73,8 @@ func nthOnePos(b, n byte) byte {
 	return 0
 }
 
-func removeSliceItem[S ~[]E, E any](s *S, i int) {
+// removeAtIndex removes the item at index `i` from the slice `*s`.
+func removeAtIndex[S ~[]E, E any](s *S, i int) {
 	if i < 0 || s == nil || i >= len(*s) {
 		return
 	}
@@ -98,6 +104,8 @@ func decodeFixedRune(b0, b1, b2 byte) rune {
 
 // equalsFixedRune determines if a a rune is equal to another one previously
 // encoded with encodeFixedRune.
+//
+// TODO: review if needed
 func compareWhileEncoding(r rune, b0, b1, b2 byte) bool {
 	// compare least significant bytes first
 	return byte(r) == b0 &&
@@ -105,6 +113,9 @@ func compareWhileEncoding(r rune, b0, b1, b2 byte) bool {
 		byte(r>>16)&lsb5Mask == b2 // only use the 5 lsb
 }
 
+// compareWhileDecoding ...
+//
+// TODO: review if needed
 func compareWhileDecoding(r rune, b0, b1, b2 byte) bool {
 	// compare least significant bytes first
 	return r&maxUint8 == rune(b0) &&

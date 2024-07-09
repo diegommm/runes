@@ -4,11 +4,23 @@ import "github.com/diegommm/runes/iface"
 
 type Iterator = iface.Iterator
 
+func ExpandIterator(i Iterator) []rune {
+	ret := make([]rune, 0, i.RuneLen())
+	for {
+		r, ok := i.NextRune()
+		if !ok {
+			break
+		}
+		ret = append(ret, r)
+	}
+	return ret
+}
+
 // RunesIterator returns an iterator from the given slice of runes, which must
 // be in sorted ascending order and non-repeating.
 func RunesIterator(rs []rune) Iterator {
 	if len(rs) > maxInt32 {
-		panic("RunesIterator: runes overflow")
+		panic("RunesIterator: too many runes")
 	}
 	return &runesIterator{rs: rs}
 }
@@ -104,7 +116,7 @@ func MergeIterators(is ...Iterator) Iterator {
 	for i := len(is) - 1; i >= 0; i-- {
 		r, ok := is[i].NextRune()
 		if !ok {
-			removeSliceItem(&is, i)
+			removeAtIndex(&is, i)
 			continue
 		}
 		isRunes = append(isRunes, r)
@@ -126,8 +138,8 @@ func MergeIterators(is ...Iterator) Iterator {
 			if isRunes[i] == minRune {
 				r, ok := is[i].NextRune()
 				if !ok {
-					removeSliceItem(&is, i)
-					removeSliceItem(&isRunes, i)
+					removeAtIndex(&is, i)
+					removeAtIndex(&isRunes, i)
 					continue
 				}
 				isRunes[i] = r

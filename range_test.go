@@ -3,36 +3,15 @@ package runes
 import (
 	"fmt"
 	"testing"
-	"unsafe"
 
 	"github.com/diegommm/runes/test"
 )
-
-func (x twoRange[R]) ByteLen() (int, bool) {
-	s0, ok0 := EstimateByteLen(x[0])
-	s1, ok1 := EstimateByteLen(x[1])
-	return s0 + s1, ok0 && ok1
-}
-
-func (x bsRange[R]) ByteLen() (l int, exact bool) {
-	l, exact = int(unsafe.Sizeof(x)), true
-	for i := range x {
-		lx, okx := EstimateByteLen(x[i])
-		l += lx
-		exact = exact && okx
-	}
-	return
-}
-
-func (x uniformRange5) ByteLen() (int, bool) {
-	return int(unsafe.Sizeof(x)), true
-}
 
 func TestEmptyRange(t *testing.T) {
 	t.Parallel()
 
 	test.RangeInvariantTestCases{
-		{"always empty", EmptyRange, nil},
+		{"always empty", EmptyRange, nil, nil},
 	}.Run(t)
 }
 
@@ -43,9 +22,9 @@ func TestOneValueRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, tc := range testCases {
 				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
-					Name:  fmt.Sprintf("%d", tc),
-					Range: f(tc),
-					Runes: []rune{tc},
+					Name:          fmt.Sprintf("%d", tc),
+					Range:         f(tc),
+					AllValidRunes: []rune{tc},
 				})
 			}
 		})
@@ -75,28 +54,23 @@ func TestOneValueRange(t *testing.T) {
 func TestNewDynamicOneValueRange(t *testing.T) {
 	t.Parallel()
 
-	_, ok := NewDynamicOneValueRange(0).(OneValueRange1)
-	True(t, ok)
-	_, ok = NewDynamicOneValueRange(maxUint8).(OneValueRange1)
-	True(t, ok)
-	_, ok = NewDynamicOneValueRange(maxUint8 + 1).(OneValueRange2)
-	True(t, ok)
-	_, ok = NewDynamicOneValueRange(maxUint16).(OneValueRange2)
-	True(t, ok)
-	_, ok = NewDynamicOneValueRange(maxUint16 + 1).(OneValueRange3)
-	True(t, ok)
+	shouldType[OneValueRange1](NewDynamicOneValueRange(0))(t)
+	shouldType[OneValueRange1](NewDynamicOneValueRange(maxUint8))(t)
+	shouldType[OneValueRange2](NewDynamicOneValueRange(maxUint8 + 1))(t)
+	shouldType[OneValueRange2](NewDynamicOneValueRange(maxUint16))(t)
+	shouldType[OneValueRange3](NewDynamicOneValueRange(maxUint16 + 1))(t)
 }
 
 func TestSimpleRange(t *testing.T) {
 	t.Parallel()
 
-	run := func(name string, f func(rune, rune) Range, testCases [][2]rune) {
+	run := func(name string, f func(*testing.T, rune, rune) Range, testCases [][2]rune) {
 		t.Run(name, func(t *testing.T) {
 			for _, tc := range testCases {
 				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
-					Name:  fmt.Sprintf("[%d,%d]", tc[0], tc[1]),
-					Range: f(tc[0], tc[1]),
-					Runes: seq[rune](tc[0], tc[1]),
+					Name:          fmt.Sprintf("[%d,%d]", tc[0], tc[1]),
+					Range:         f(t, tc[0], tc[1]),
+					AllValidRunes: seq(tc[0], tc[1]),
 				})
 			}
 		})
@@ -124,39 +98,43 @@ func TestSimpleRange(t *testing.T) {
 	}
 	testCases34 = append(testCases2, testCases34...)
 
-	run("OneValueRange1", func(from, to rune) Range {
-		return Must(NewSimpleRange[OneValueRange1](from, to))
+	run("OneValueRange1", func(t *testing.T, from, to rune) Range {
+		return withoutErr(NewSimpleRange[OneValueRange1](from, to))(t)
 	}, testCases1)
 
-	run("OneValueRange2", func(from, to rune) Range {
-		return Must(NewSimpleRange[OneValueRange2](from, to))
+	run("OneValueRange2", func(t *testing.T, from, to rune) Range {
+		return withoutErr(NewSimpleRange[OneValueRange2](from, to))(t)
 	}, testCases2)
 
-	run("OneValueRange3", func(from, to rune) Range {
-		return Must(NewSimpleRange[OneValueRange3](from, to))
+	run("OneValueRange3", func(t *testing.T, from, to rune) Range {
+		return withoutErr(NewSimpleRange[OneValueRange3](from, to))(t)
 	}, testCases34)
 
-	run("OneValueRange4", func(from, to rune) Range {
-		return Must(NewSimpleRange[OneValueRange4](from, to))
+	run("OneValueRange4", func(t *testing.T, from, to rune) Range {
+		return withoutErr(NewSimpleRange[OneValueRange4](from, to))(t)
 	}, testCases34)
 
-	_, err := NewSimpleRange[OneValueRange1](1, 0)
-	True(t, err != nil)
+	shouldErr(NewSimpleRange[OneValueRange1](1, 0))(t)
 }
 
 func TestNewDynamicSimpleRange(t *testing.T) {
 	t.Parallel()
+	var rr Range
 
-	_, ok := Must(NewDynamicSimpleRange(0, 0)).(SimpleRange[OneValueRange1])
-	True(t, ok)
-	_, ok = Must(NewDynamicSimpleRange(0, maxUint8)).(SimpleRange[OneValueRange1])
-	True(t, ok)
-	_, ok = Must(NewDynamicSimpleRange(0, maxUint8+1)).(SimpleRange[OneValueRange2])
-	True(t, ok)
-	_, ok = Must(NewDynamicSimpleRange(0, maxUint16)).(SimpleRange[OneValueRange2])
-	True(t, ok)
-	_, ok = Must(NewDynamicSimpleRange(0, maxUint16+1)).(SimpleRange[OneValueRange3])
-	True(t, ok)
+	rr = withoutErr(NewDynamicSimpleRange(0, 0))(t)
+	shouldType[SimpleRange[OneValueRange1]](rr)(t)
+
+	rr = withoutErr(NewDynamicSimpleRange(0, maxUint8))(t)
+	shouldType[SimpleRange[OneValueRange1]](rr)(t)
+
+	rr = withoutErr(NewDynamicSimpleRange(0, maxUint8+1))(t)
+	shouldType[SimpleRange[OneValueRange2]](rr)(t)
+
+	rr = withoutErr(NewDynamicSimpleRange(0, maxUint16))(t)
+	shouldType[SimpleRange[OneValueRange2]](rr)(t)
+
+	rr = withoutErr(NewDynamicSimpleRange(0, maxUint16+1))(t)
+	shouldType[SimpleRange[OneValueRange3]](rr)(t)
 }
 
 func TestRuneListRange(t *testing.T) {
@@ -166,9 +144,9 @@ func TestRuneListRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for i, tc := range testCases {
 				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
-					Name:  fmt.Sprintf("[%d] len=%d", i, len(tc)),
-					Range: f(RunesIterator(tc)),
-					Runes: tc,
+					Name:          fmt.Sprintf("[%d] len=%d", i, len(tc)),
+					Range:         f(RunesIterator(tc)),
+					AllValidRunes: tc,
 				})
 			}
 		})
@@ -239,108 +217,110 @@ func TestRuneListRange(t *testing.T) {
 
 func TestNewDynamicRuneListRange(t *testing.T) {
 	t.Parallel()
+	var rr Range
 
 	// dumb cases
-	i := RunesIterator(nil)
-	_, ok := NewDynamicRuneListRange(i).(emptyRange)
-	True(t, ok)
-	i = RunesIterator([]rune{0})
-	_, ok = NewDynamicRuneListRange(i).(OneValueRange1)
-	True(t, ok)
+	rr = NewDynamicRuneListRange(RunesIterator(nil))
+	shouldType[emptyRange](rr)(t)
+
+	rr = NewDynamicRuneListRange(RunesIterator([]rune{0}))
+	shouldType[OneValueRange1](rr)(t)
 
 	// linear search cases
-	i = RunesIterator(seq[rune](0, 1))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeLinear[OneValueRange1])
-	True(t, ok)
-	i = RunesIterator(seq[rune](0, 1, maxUint16))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeLinear[OneValueRange2])
-	True(t, ok)
-	i = RunesIterator(seq[rune](0, 1, 1<<20))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeLinear[OneValueRange3])
-	True(t, ok)
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, 1)))
+	shouldType[RuneListRangeLinear[OneValueRange1]](rr)(t)
+
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, 1, maxUint16)))
+	shouldType[RuneListRangeLinear[OneValueRange2]](rr)(t)
+
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, 1, 1<<20)))
+	shouldType[RuneListRangeLinear[OneValueRange3]](rr)(t)
 
 	// binary search cases
-	i = RunesIterator(seq[rune](0, maxRuneListLinearSearch+1))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeBinary[OneValueRange1])
-	True(t, ok)
-	i = RunesIterator(seq[rune](0, maxRuneListLinearSearch, maxUint16))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeBinary[OneValueRange2])
-	True(t, ok)
-	i = RunesIterator(seq[rune](0, maxRuneListLinearSearch, 1<<20))
-	_, ok = NewDynamicRuneListRange(i).(RuneListRangeBinary[OneValueRange3])
-	True(t, ok)
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, maxRuneListLinearSearch+1)))
+	shouldType[RuneListRangeBinary[OneValueRange1]](rr)(t)
+
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, maxRuneListLinearSearch, maxUint16)))
+	shouldType[RuneListRangeBinary[OneValueRange2]](rr)(t)
+
+	rr = NewDynamicRuneListRange(RunesIterator(seq(0, maxRuneListLinearSearch, 1<<20)))
+	shouldType[RuneListRangeBinary[OneValueRange3]](rr)(t)
 }
 
 func TestExceptionRange(t *testing.T) {
 	t.Parallel()
 
-	one10 := Must(NewDynamicSimpleRange(1, 10))
-	zero100 := Must(NewDynamicSimpleRange(0, 100))
+	one10 := withoutErr(NewDynamicSimpleRange(1, 10))(t)
+	zero100 := withoutErr(NewDynamicSimpleRange(0, 100))(t)
+
+	var xx Range
+	xx = withoutErr(NewDynamicSimpleRange(1, 9))(t)
+	xx = withoutErr(ExceptionRange(xx, NewOneValueRange[OneValueRange4](6)))(t)
+	xx = withoutErr(ExceptionRange(xx, NewOneValueRange[OneValueRange4](2)))(t)
+	xx = withoutErr(ExceptionRange(xx, NewOneValueRange[OneValueRange4](8)))(t)
+	xx = withoutErr(ExceptionRange(xx, NewOneValueRange[OneValueRange4](4)))(t)
+	xxEls := []rune{1, 3, 5, 7, 9}
 
 	test.RangeInvariantTestCases{
 		{"[0,100] except 1",
-			Must(ExceptionRange(zero100, NewDynamicOneValueRange(1))),
-			seq[rune](2, 100, 0)},
+			withoutErr(ExceptionRange(zero100, NewDynamicOneValueRange(1)))(t),
+			seq(2, 100, 0), nil},
 		{"[0,100] except [1,10]",
-			Must(ExceptionRange(zero100, one10)),
-			seq[rune](11, 100, 0)},
+			withoutErr(ExceptionRange(zero100, one10))(t),
+			seq(11, 100, 0), nil},
+		{"[1,9] except {2,4,6,8}", xx, xxEls, nil},
 	}.Run(t)
 
-	_, err := ExceptionRange(one10, EmptyRange)
-	True(t, err != nil)
-	_, err = ExceptionRange(zero100, NewDynamicOneValueRange(0))
-	True(t, err != nil)
-	_, err = ExceptionRange(one10, zero100)
-	True(t, err != nil)
+	shouldErr(ExceptionRange(one10, EmptyRange))(t)
+	shouldErr(ExceptionRange(zero100, NewDynamicOneValueRange(0)))(t)
+	shouldErr(ExceptionRange(one10, zero100))(t)
 }
 
 func TestUniformRange(t *testing.T) {
 	t.Parallel()
 
-	// 5 bytes uniform range
+	testCases := []struct {
+		name      string
+		minRune   rune
+		runeCount uint16
+		stride    uint16
+		expected  []rune
+		invalid   []rune
+	}{
+		{"1 each 2", 0, 2, 2, []rune{0, 2}, []rune{1, 4}},
+		{"1 each 2", 3, 2, 2, []rune{3, 5}, []rune{1, 7}},
+		{"3 each 2", 3, 3, 2, []rune{3, 5, 7}, []rune{1, 9}},
+		{"3 each 5", 3, 3, 5, []rune{3, 8, 13}, []rune{1, 14, 15, 16, 17, 18, 19}},
+		{"3 each 7", 31, 3, 7, []rune{31, 38, 45}, []rune{25, 26, 27, 28, 29, 47, 48, 49, 50, 51, 52, 53}},
+	}
 
-	test.RangeInvariantTestCases{
-		{"1 each 2", Must(NewUniformRange5(0, 2, 2)), []rune{0, 2}},
-		{"1 each 2", Must(NewUniformRange5(3, 2, 2)), []rune{3, 5}},
-		{"3 each 2", Must(NewUniformRange5(3, 3, 2)), []rune{3, 5, 7}},
-		{"3 each 5", Must(NewUniformRange5(3, 3, 5)), []rune{3, 8, 13}},
-		{"3 each 7", Must(NewUniformRange5(31, 3, 7)), []rune{31, 38, 45}},
-	}.Run(t)
+	run := func(name string, f func(rune, uint16, uint16) (Range, error)) {
+		t.Run("implem="+name, func(t *testing.T) {
+			for _, tc := range testCases {
+				test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
+					tc.name,
+					withoutErr(f(tc.minRune, tc.runeCount, tc.stride))(t),
+					tc.expected,
+					tc.invalid,
+				})
+			}
 
-	_, err := NewUniformRange5(0, 1, 2)
-	True(t, err != nil)
-	_, err = NewUniformRange5(0, 2, 1)
-	True(t, err != nil)
+			shouldErr(f(0, 1, 2))(t)
+			shouldErr(f(0, 2, 1))(t)
+		})
+	}
 
-	// 6 bytes uniform range
+	run("NewUniformRange5", func(minRune rune, runeCount, stride uint16) (Range, error) {
+		return NewUniformRange5(minRune, runeCount, byte(stride))
+	})
 
-	test.RangeInvariantTestCases{
-		{"1 each 2", Must(NewUniformRange68[uint16](0, 2, 2)), []rune{0, 2}},
-		{"1 each 2", Must(NewUniformRange68[uint16](3, 2, 2)), []rune{3, 5}},
-		{"3 each 2", Must(NewUniformRange68[uint16](3, 3, 2)), []rune{3, 5, 7}},
-		{"3 each 5", Must(NewUniformRange68[uint16](3, 3, 5)), []rune{3, 8, 13}},
-		{"3 each 7", Must(NewUniformRange68[uint16](31, 3, 7)), []rune{31, 38, 45}},
-	}.Run(t)
+	run("NewUniformRange6", func(minRune rune, runeCount, stride uint16) (Range, error) {
+		return NewUniformRange68[uint16](uint16(minRune), runeCount, stride)
+	})
 
-	_, err = NewUniformRange68[uint16](0, 1, 2)
-	True(t, err != nil)
-	_, err = NewUniformRange68[uint16](0, 2, 1)
-	True(t, err != nil)
-
-	// 8 bytes uniform range
-
-	test.RangeInvariantTestCases{
-		{"1 each 2", Must(NewUniformRange68[rune](0, 2, 2)), []rune{0, 2}},
-		{"1 each 2", Must(NewUniformRange68[rune](3, 2, 2)), []rune{3, 5}},
-		{"3 each 2", Must(NewUniformRange68[rune](3, 3, 2)), []rune{3, 5, 7}},
-		{"3 each 5", Must(NewUniformRange68[rune](3, 3, 5)), []rune{3, 8, 13}},
-		{"3 each 7", Must(NewUniformRange68[rune](31, 3, 7)), []rune{31, 38, 45}},
-	}.Run(t)
-
-	_, err = NewUniformRange68[rune](0, 1, 2)
-	True(t, err != nil)
-	_, err = NewUniformRange68[rune](0, 2, 1)
-	True(t, err != nil)
+	run("NewUniformRange8", func(minRune rune, runeCount, stride uint16) (Range, error) {
+		return NewUniformRange68[rune](minRune, runeCount, stride)
+	})
 }
 
 func TestBitmapRange(t *testing.T) {
@@ -350,16 +330,17 @@ func TestBitmapRange(t *testing.T) {
 		{0},
 		{0, 5, 6},
 		{1, 6, 7, 9},
-		{0, 1, 5, 7, 90, 213, 256, 257, 258, 259, 1024},
-		{11, maxUint16, maxUint16 + 10, maxUint16 + 34, maxUint16 + 98},
-		seq[rune](100, 500),
+		{0, 1, 5, 7, 90, 213, 256, 257, 258, 259, 512},
+		{maxUint16, maxUint16 + 10, maxUint16 + 34, maxUint16 + 98},
+		seq(100, 200),
 	}
 
 	for i, tc := range testCases {
 		test.TestRangeInvariants(t, &test.RangeInvariantTestCase{
 			fmt.Sprintf("%d", i),
-			Must(NewBitmapRange(RunesIterator(tc))),
+			withoutErr(NewBitmapRange(RunesIterator(tc)))(t),
 			tc,
+			nil,
 		})
 	}
 }
