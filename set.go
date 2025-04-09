@@ -1,11 +1,6 @@
 package runes
 
-const (
-	maxUint8  = 1<<8 - 1
-	maxUint16 = 1<<16 - 1
-
-	lsb5Mask = 1<<5 - 1
-)
+const maxUint16 = 1<<16 - 1
 
 // Set is a set of runes.
 type Set interface {
@@ -13,12 +8,18 @@ type Set interface {
 	Contains(rune) bool
 }
 
-// Sets is a [Set] that will use a linear search over its inner [Set] elements.
-// Using a type parameter is useful to create a compact set of the same type to
-// further reduce the memory footprint.
-type Sets[T Set] []T
+// RuneT are the types with which runes of different width can be represented
+// without losing information.
+type RuneT interface {
+	uint8 | uint16 | rune
+}
 
-func (x Sets[T]) Contains(r rune) bool {
+// Union is a [Set] that represents the union of its elements. Using a type
+// parameter is useful to create a compact set of the same type to further
+// reduce the memory footprint.
+type Union[T Set] []T
+
+func (x Union[T]) Contains(r rune) bool {
 	for i := range x {
 		if x[i].Contains(r) {
 			return true
@@ -27,16 +28,16 @@ func (x Sets[T]) Contains(r rune) bool {
 	return false
 }
 
-// LinearSlice is a [Set] uses a linear search in its `Contains` method.
-type LinearSlice[T interface{ uint16 | rune }] struct {
+// LinearSlice is a [Set] that uses a linear search in its `Contains` method.
+type LinearSlice[T RuneT] struct {
 	Values []T // must be sorted asc
 }
 
 func (x LinearSlice[T]) Contains(r rune) bool {
-	if len(x.Values) == 0 || r < rune(x.Values[0]) || rune(x.Values[len(x.Values)-1]) < r {
-		return false
-	}
-	return x.containsSlow(r)
+	return len(x.Values) > 0 &&
+		r >= rune(x.Values[0]) &&
+		r <= rune(x.Values[len(x.Values)-1]) &&
+		x.containsSlow(r)
 }
 
 func (x LinearSlice[T]) containsSlow(r rune) bool {
@@ -48,16 +49,16 @@ func (x LinearSlice[T]) containsSlow(r rune) bool {
 	return false
 }
 
-// BinarySlice is a [Set] uses a binary search in its `Contains` method.
-type BinarySlice[T interface{ uint16 | rune }] struct {
+// BinarySlice is a [Set] that uses a binary search in its `Contains` method.
+type BinarySlice[T RuneT] struct {
 	Values []T // must be sorted asc
 }
 
 func (x BinarySlice[T]) Contains(r rune) bool {
-	if len(x.Values) == 0 || r < rune(x.Values[0]) || rune(x.Values[len(x.Values)-1]) < r {
-		return false
-	}
-	return x.containsSlow(r)
+	return len(x.Values) > 0 &&
+		r >= rune(x.Values[0]) &&
+		r <= rune(x.Values[len(x.Values)-1]) &&
+		x.containsSlow(r)
 }
 
 func (x BinarySlice[T]) containsSlow(r rune) bool {
@@ -75,83 +76,71 @@ func (x BinarySlice[T]) containsSlow(r rune) bool {
 	return false
 }
 
-// Range is the set of runes in the inclusive set [From, To].
-type Range[T interface{ uint16 | rune }] struct {
+// Interval is the set of runes in the interval [From, To].
+type Interval[T RuneT] struct {
 	From, To T // `From` must be less than or equal to `To`
 }
 
-func (x Range[T]) Contains(r rune) bool {
+func (x Interval[T]) Contains(r rune) bool {
 	return r >= rune(x.From) && r <= rune(x.To)
 }
 
 // Uniform is a [Set] that contains `Count` runes uniformly distributed `Stride`
 // apart from each other, starting at `First`. For a `Stride` value of 1, a
-// `Range` is slightly more compact and faster.
-type Uniform[T interface{ uint16 | rune }] struct {
-	First  T
-	Stride uint16
-	Count  uint16
+// `Interval` is slightly more compact and faster.
+type Uniform[F, S, C RuneT] struct {
+	First  F
+	Count  C // must be positive
+	Stride S // must be positive
 }
 
-func (x Uniform[T]) Contains(r rune) bool {
+func (x Uniform[F, S, C]) Contains(r rune) bool {
 	u, s, c := uint32(r-rune(x.First)), uint32(x.Stride), uint32(x.Count)
-	return s > 0 && // always true, but removes runtime.panicdivide
-		u < s*c && u%s == 0
+	return s > 0 && u < s*c && u%s == 0
 }
 
 // NewBitmap creates a [Bitmap] from the given runes, which must be sorted in
 // ascending order.
-func NewBitmap(rs []rune) (Bitmap, error) {
+func NewBitmap(rs []rune) Bitmap {
 	if len(rs) == 0 {
-		return "", &errString{"NewBitmap: no runes given"}
-	}
-	if len(rs) > maxUint16 {
-		return "", &errString{"NewBitmap: too many elements"}
+		return ""
 	}
 
 	// allocate for the whole string
 	span := uint32(rs[len(rs)-1] + 2 - rs[0])
-	bin := make([]byte, stringBitmapHeaderLen+ceilDiv(span, 8))
+	bin := make([]byte, bmHdrLen+ceilDiv(span, 8))
 
 	// encode header
-	encodeFixedRune((*[3]byte)(bin), rs[0])
-	encodeUint16((*[2]byte)(bin[3:]), uint16(len(rs)))
+	bmEncodeMinRune((*[bmHdrLen]byte)(bin), rs[0])
 
 	// build the bitmap
-	bm := bin[stringBitmapHeaderLen:]
+	bm := bin[bmHdrLen:]
 	for _, r := range rs {
 		u := uint32(r - rs[0])
 		bm[u>>3] |= 1 << (u & 7)
 	}
 
-	return Bitmap(bin), nil
+	return Bitmap(bin)
 }
 
-// Bitmap is a general purpose [Set] that uses an internal bitmap for constant
-// time search that is also quite fast, ideal for patchy sets of runes with a
-// non-trivial distribution.
+// Bitmap is a general purpose [Set] that uses an internal bitmap for fast and
+// constant time search.
 type Bitmap string
 
-const stringBitmapHeaderLen = 0 +
-	3 + // first rune encoded in 3 bytes
-	2 // number of runes as a uint16
+// bmHdrLen is the length of the header of a Bitmap that contains the first
+// rune, encoded as 3 bytes in little-endian. Even the rune type being an int32,
+// utf8.MaxRune is only 3 bytes long, so a valid rune will never take more than
+// that.
+const bmHdrLen = 3
 
 func (x Bitmap) Contains(r rune) bool {
-	if len(x) <= stringBitmapHeaderLen {
+	if len(x) <= bmHdrLen {
 		return false
 	}
-	u := uint32(r - decodeFixedRune(x[0], x[1], x[2]))
-	i := stringBitmapHeaderLen + int(u>>3)
+	u := uint32(r - bmDecodeMinRune(x[0], x[1], x[2]))
+	i := bmHdrLen + int(u>>3)
 	// why having runtime.panicIndex is faster here???
 	return i < len(x) && 1<<(u&7)&x[i] != 0
-}
-
-type errString struct {
-	string
-}
-
-func (e *errString) Error() string {
-	return e.string
 }
 
 // ceilDiv performs the integer division of two uint32, rounding to the next
@@ -165,30 +154,16 @@ func u32Mid(a, b uint32) uint32 {
 	return uint32((uint64(a) + uint64(b)) >> 1)
 }
 
-// encodeFixedRune encodes a rune in 3 bytes with little-endian. The rune should
-// be no longer than 21 bits (only an invalid rune would be), and the 3 msb of
-// the last byte are unused.
-func encodeFixedRune(b *[3]byte, r rune) {
+// bmEncodeMinRune encodes a rune in bmHdrLen bytes with little-endian.
+func bmEncodeMinRune(b *[bmHdrLen]byte, r rune) {
 	b[0] = byte(r)
 	b[1] = byte(r >> 8)
-	b[2] = byte(r>>16) & lsb5Mask // only use the 5 lsb
+	b[2] = byte(r >> 16)
 }
 
-// decodeFixedRune decodes a rune encoded with encodeFixedRune.
-func decodeFixedRune(b0, b1, b2 byte) rune {
+// bmDecodeMinRune decodes a rune encoded with bmEncodeMinRune.
+func bmDecodeMinRune(b0, b1, b2 byte) rune {
 	return rune(b0) |
 		rune(b1)<<8 |
-		rune(b2&lsb5Mask)<<16 // discard the 3 msb
-}
-
-// encodeUint16 encodes a uint16 in 2 bytes with little-endian.
-func encodeUint16(b *[2]byte, c uint16) {
-	b[0] = byte(c)
-	b[1] = byte(c >> 8)
-}
-
-// decodeUint16 decodes a uint16 encoded with encodeUint16.
-func decodeUint16(b0, b1 byte) uint16 {
-	return uint16(b0) |
-		uint16(b1)<<8
+		rune(b2)<<16
 }
