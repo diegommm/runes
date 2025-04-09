@@ -84,13 +84,18 @@ func (tcs setTestCases) run(t *testing.T) {
 
 func TestBinarySlice(t *testing.T) {
 	t.Parallel()
-	testSlices(t, newLowestSliceSet(false))
+	testSlices(t, makeDynamicBinarySlice)
 }
 
 func TestLinearSlice(t *testing.T) {
 	t.Parallel()
-	testSlices(t, newLowestSliceSet(true))
+	testSlices(t, makeDynamicLinearSlice)
 }
+
+var (
+	makeDynamicLinearSlice = newLowestSliceSet(true)
+	makeDynamicBinarySlice = newLowestSliceSet(false)
+)
 
 func newLowestSliceSet(linear bool) func([]rune) Set {
 	// could make this much simpler, just playing around with generics tbh
