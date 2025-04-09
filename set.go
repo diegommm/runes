@@ -99,24 +99,85 @@ func (x Uniform[F, S, C]) Contains(r rune) bool {
 	return s > 0 && u < s*c && u%s == 0
 }
 
+// RuneList allows efficient iteration over an otherwise unknown set of runes.
+type RuneList interface {
+	Min() rune // -1 if empty, immutable
+	Max() rune // -1 if empty, immutable
+
+	// RuneIter returns an iterotor that returns true as long as there are
+	// items, and starts returning (0, false) afterward. See `compat`
+	// sub-package for adapters.
+	RuneIter() RuneIterator
+}
+
+// SliceRuneList is a [RuneList] backed by a []rune.
+type SliceRuneList []rune
+
+func (x SliceRuneList) Min() rune {
+	if len(x) == 0 {
+		return -1
+	}
+	return x[0]
+}
+
+func (x SliceRuneList) Max() rune {
+	if len(x) == 0 {
+		return -1
+	}
+	return x[len(x)-1]
+}
+
+func (x SliceRuneList) RuneIter() RuneIterator {
+	var i int
+	return func() (rune, bool) {
+		if ret := i; ret < len(x) {
+			i++
+			return x[ret], true
+		}
+		return 0, false
+	}
+}
+
+type RuneIterator = func() (rune, bool)
+
+// RuneIters returns a rune iterator X that combines the runes produced by the
+// rune iterators successively returned by `f`. When `f` returns nil, then X is
+// done.
+func RuneIters(f func() RuneIterator) RuneIterator {
+	it := f()
+	return func() (rune, bool) {
+		for {
+			if it == nil {
+				return 0, false
+			}
+			if r, ok := it(); ok {
+				return r, true
+			}
+			it = f()
+		}
+	}
+}
+
 // NewBitmap creates a [Bitmap] from the given runes, which must be sorted in
 // ascending order.
-func NewBitmap(rs []rune) Bitmap {
-	if len(rs) == 0 {
+func NewBitmap(ri RuneList) Bitmap {
+	if ri == nil || ri.Min() < 0 {
 		return ""
 	}
+	mn, mx := ri.Min(), ri.Max()
 
 	// allocate for the whole string
-	span := uint32(rs[len(rs)-1] + 2 - rs[0])
+	span := uint32(mx + 2 - mn)
 	bin := make([]byte, bmHdrLen+ceilDiv(span, 8))
 
 	// encode header
-	bmEncodeMinRune((*[bmHdrLen]byte)(bin), rs[0])
+	bmEncodeMinRune((*[bmHdrLen]byte)(bin), mn)
 
 	// build the bitmap
 	bm := bin[bmHdrLen:]
-	for _, r := range rs {
-		u := uint32(r - rs[0])
+	it := ri.RuneIter()
+	for r, ok := it(); ok; r, ok = it() {
+		u := uint32(r - mn)
 		bm[u>>3] |= 1 << (u & 7)
 	}
 

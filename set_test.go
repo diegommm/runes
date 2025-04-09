@@ -203,20 +203,20 @@ func TestBitmap(t *testing.T) {
 	someRunes := []rune{1, 3, 99, 410}
 	setTestCases{
 		{
-			set:         NewBitmap(nil),
+			set:         NewBitmap(SliceRuneList(nil)),
 			notContains: seq(-1, utf8.MaxRune),
 		},
 		{
-			set:         NewBitmap([]rune{}),
+			set:         NewBitmap(SliceRuneList([]rune{})),
 			notContains: seq(-1, utf8.MaxRune),
 		},
 		{
-			set:         NewBitmap(someRunes),
+			set:         NewBitmap(SliceRuneList(someRunes)),
 			contains:    slices.Values(someRunes),
 			notContains: except(seq(-1, utf8.MaxRune), slices.Values(someRunes)),
 		},
 		{
-			set:         NewBitmap([]rune{utf8.MaxRune}),
+			set:         NewBitmap(SliceRuneList([]rune{utf8.MaxRune})),
 			contains:    slices.Values([]rune{utf8.MaxRune}),
 			notContains: seq(-1, utf8.MaxRune-1),
 		},
