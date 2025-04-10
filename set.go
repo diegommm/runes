@@ -29,20 +29,19 @@ func (x Union[T]) Contains(r rune) bool {
 }
 
 // LinearSlice is a [Set] that uses a linear search in its `Contains` method.
-type LinearSlice[T RuneT] struct {
-	Values []T // must be sorted asc
-}
+// Its elements must be sorted in ascending order.
+type LinearSlice[T RuneT] []T
 
 func (x LinearSlice[T]) Contains(r rune) bool {
-	return len(x.Values) > 0 &&
-		r >= rune(x.Values[0]) &&
-		r <= rune(x.Values[len(x.Values)-1]) &&
+	return len(x) > 0 &&
+		r >= rune(x[0]) &&
+		r <= rune(x[len(x)-1]) &&
 		x.containsSlow(r)
 }
 
 func (x LinearSlice[T]) containsSlow(r rune) bool {
-	for i := range x.Values {
-		if r == rune(x.Values[i]) {
+	for i := range x {
+		if r == rune(x[i]) {
 			return true
 		}
 	}
@@ -50,21 +49,20 @@ func (x LinearSlice[T]) containsSlow(r rune) bool {
 }
 
 // BinarySlice is a [Set] that uses a binary search in its `Contains` method.
-type BinarySlice[T RuneT] struct {
-	Values []T // must be sorted asc
-}
+// Its elements must be sorted in ascending order.
+type BinarySlice[T RuneT] []T
 
 func (x BinarySlice[T]) Contains(r rune) bool {
-	return len(x.Values) > 0 &&
-		r >= rune(x.Values[0]) &&
-		r <= rune(x.Values[len(x.Values)-1]) &&
+	return len(x) > 0 &&
+		r >= rune(x[0]) &&
+		r <= rune(x[len(x)-1]) &&
 		x.containsSlow(r)
 }
 
 func (x BinarySlice[T]) containsSlow(r rune) bool {
-	i, j := uint32(0), uint32(len(x.Values)-1)
-	for h := u32Mid(i, j); i <= j && int(h) < len(x.Values); h = u32Mid(i, j) {
-		switch v := rune(x.Values[h]); {
+	i, j := uint32(0), uint32(len(x)-1)
+	for h := u32Mid(i, j); i <= j && int(h) < len(x); h = u32Mid(i, j) {
+		switch v := rune(x[h]); {
 		case r < v:
 			j = h - 1
 		case v < r:
@@ -90,8 +88,8 @@ func (x Interval[T]) Contains(r rune) bool {
 // `Interval` is slightly more compact and faster.
 type Uniform[F, S, C RuneT] struct {
 	First  F
-	Count  C // must be positive
-	Stride S // must be positive
+	Count  C // must be non-negative
+	Stride S // must be non-negative
 }
 
 func (x Uniform[F, S, C]) Contains(r rune) bool {
@@ -99,69 +97,23 @@ func (x Uniform[F, S, C]) Contains(r rune) bool {
 	return s > 0 && u < s*c && u%s == 0
 }
 
-// RuneList allows efficient iteration over an otherwise unknown set of runes.
-type RuneList interface {
-	Min() rune // -1 if empty, immutable
-	Max() rune // -1 if empty, immutable
+// OrderedRunesIter is a function that iterates over a list of runes in
+// ascending order, returning a rune and true while there are runes available.
+// When there are no more runes, it returns zero value and false indefinitely.
+type OrderedRunesIter = func() (rune, bool)
 
-	// RuneIter returns an iterotor that returns true as long as there are
-	// items, and starts returning (0, false) afterward. See `compat`
-	// sub-package for adapters.
-	RuneIter() RuneIterator
-}
-
-// SliceRuneList is a [RuneList] backed by a []rune.
-type SliceRuneList []rune
-
-func (x SliceRuneList) Min() rune {
-	if len(x) == 0 {
-		return -1
-	}
-	return x[0]
-}
-
-func (x SliceRuneList) Max() rune {
-	if len(x) == 0 {
-		return -1
-	}
-	return x[len(x)-1]
-}
-
-func (x SliceRuneList) RuneIter() RuneIterator {
-	var i int
-	return func() (rune, bool) {
-		if ret := i; ret < len(x) {
-			i++
-			return x[ret], true
-		}
-		return 0, false
-	}
-}
-
-type RuneIterator = func() (rune, bool)
-
-// RuneIters returns a rune iterator X that combines the runes produced by the
-// rune iterators successively returned by `f`. When `f` returns nil, then X is
-// done.
-func RuneIters(f func() RuneIterator) RuneIterator {
-	it := f()
-	return func() (rune, bool) {
-		for {
-			if it == nil {
-				return 0, false
-			}
-			if r, ok := it(); ok {
-				return r, true
-			}
-			it = f()
-		}
-	}
+// OrderedRunesList is a list of ordered runes.
+type OrderedRunesList interface {
+	Min() rune // zero value if list is empty, immutable
+	Max() rune // zero value if list is empty, immutable
+	Len() int  // number of items in the list, immutable
+	Iter() OrderedRunesIter
 }
 
 // NewBitmap creates a [Bitmap] from the given runes, which must be sorted in
 // ascending order.
-func NewBitmap(ri RuneList) Bitmap {
-	if ri == nil || ri.Min() < 0 {
+func NewBitmap(ri OrderedRunesList) Bitmap {
+	if ri == nil || ri.Len() == 0 {
 		return ""
 	}
 	mn, mx := ri.Min(), ri.Max()
@@ -175,7 +127,7 @@ func NewBitmap(ri RuneList) Bitmap {
 
 	// build the bitmap
 	bm := bin[bmHdrLen:]
-	it := ri.RuneIter()
+	it := ri.Iter()
 	for r, ok := it(); ok; r, ok = it() {
 		u := uint32(r - mn)
 		bm[u>>3] |= 1 << (u & 7)

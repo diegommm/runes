@@ -2,19 +2,19 @@ package compat
 
 import (
 	"fmt"
-	"slices"
 	"testing"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/diegommm/runes"
+	"github.com/diegommm/runes/util"
 )
 
 func BenchmarkIsSpace(b *testing.B) {
 	rt := FromUnicode(unicode.White_Space)
-	rs := slices.Collect(rt.All())
-	ls := runes.LinearSlice[rune]{rs}
-	bs := runes.BinarySlice[rune]{rs}
+	rs := util.Collect(rt.Iter())
+	ls := runes.LinearSlice[rune](rs)
+	bs := runes.BinarySlice[rune](rs)
 	bm := runes.NewBitmap(rt)
 
 	testRunes := append(rs, -1, 0, utf8.MaxRune)

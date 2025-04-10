@@ -1,27 +1,22 @@
 package compat
 
 import (
-	"iter"
 	"unicode"
 	"unsafe"
 
 	"github.com/diegommm/runes"
+	"github.com/diegommm/runes/util"
 )
 
-type Table interface {
-	Len() int                     // 0 if empty
-	Min() rune                    // -1 if empty
-	Max() rune                    // -1 if empty
-	All() iter.Seq[rune]          // sorted asc
-	RuneIter() runes.RuneIterator // sorted asc
-}
-
+// SizeofUnicodeRangeTable estimates the amount of bytes required to store a
+// *unicode.RangeTable in memory.
 func SizeofUnicodeRangeTable(rt *unicode.RangeTable) int {
 	return int(unsafe.Sizeof(*rt)) +
 		len(rt.R16)*int(unsafe.Sizeof(unicode.Range16{})) +
 		len(rt.R32)*int(unsafe.Sizeof(unicode.Range32{}))
 }
 
+// FromUnicode converts a *unicode.RangeTable to a [RangeTables].
 func FromUnicode(rt *unicode.RangeTable) RangeTables {
 	ret := make(RangeTables, 0, len(rt.R16)+len(rt.R32))
 	for _, rt := range rt.R16 {
@@ -41,6 +36,7 @@ func FromUnicode(rt *unicode.RangeTable) RangeTables {
 	return ret
 }
 
+// RangeTables is an OrderedRunesList built from a *unicode.RangeTable.
 type RangeTables []RangeTable
 
 func (rts RangeTables) Len() int {
@@ -53,56 +49,48 @@ func (rts RangeTables) Len() int {
 
 func (rts RangeTables) Min() rune {
 	if len(rts) == 0 {
-		return -1
+		return 0
 	}
 	return rts[0].Min()
 }
 
 func (rts RangeTables) Max() rune {
 	if len(rts) == 0 {
-		return -1
+		return 0
 	}
 	return rts[len(rts)-1].Max()
 }
 
-func (rts RangeTables) All() iter.Seq[rune] {
-	return func(yield func(rune) bool) {
-		for i := range rts {
-			rts[i].All()(yield)
-		}
-	}
-}
-
-func (rts RangeTables) RuneIter() runes.RuneIterator {
+func (rts RangeTables) Iter() runes.OrderedRunesIter {
 	var i int
-	return runes.RuneIters(func() runes.RuneIterator {
+	return util.IterMergeFunc(func() runes.OrderedRunesIter {
 		if ret := i; ret < len(rts) {
 			i++
-			return rts[ret].RuneIter()
+			return rts[ret].Iter()
 		}
 		return nil
 	})
 }
 
+// RangeTable is an OrderedRunesList built from either a unicode.Range16 or
+// unicode.Range32.
 type RangeTable struct {
 	Lo, Hi, Stride rune
 }
 
 func (rt RangeTable) Len() int {
-	return (int(rt.Hi) - int(rt.Lo) + 1) / int(rt.Stride)
-}
-func (rt RangeTable) Min() rune { return rt.Lo }
-func (rt RangeTable) Max() rune { return rt.Hi }
-
-func (rt RangeTable) All() iter.Seq[rune] {
-	return func(yield func(rune) bool) {
-		for i := rt.Lo; i <= rt.Hi; i += rt.Stride {
-			yield(i)
-		}
-	}
+	return 1 + (int(rt.Hi)-int(rt.Lo))/int(rt.Stride)
 }
 
-func (rt RangeTable) RuneIter() runes.RuneIterator {
+func (rt RangeTable) Min() rune {
+	return rt.Lo
+}
+
+func (rt RangeTable) Max() rune {
+	return rt.Hi
+}
+
+func (rt RangeTable) Iter() runes.OrderedRunesIter {
 	i := rt.Lo
 	return func() (rune, bool) {
 		if ret := i; ret <= rt.Hi {
