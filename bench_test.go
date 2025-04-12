@@ -2,16 +2,19 @@ package runes
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/diegommm/runes/util"
 )
 
 func BenchmarkIsSpace(b *testing.B) {
 	b.Skip("not ready :)")
 
 	rt := unicode.White_Space
-	rts := util.Collect(FromUnicode(rt).Iter())
+	rts := slices.Collect(util.RangeTableIter(rt))
 	testRunes := append(rts, -1, 0, utf8.MaxRune)
 	testRunes = testRunes[:1] // TODO
 
@@ -19,7 +22,7 @@ func BenchmarkIsSpace(b *testing.B) {
 	custom := isSpaceCustom()
 
 	// size estimations
-	rtSize := util.FormatSizeEstimation(SizeofUnicodeRangeTable(rt))
+	rtSize := util.FormatSizeEstimation(util.SizeofUnicodeRangeTable(rt))
 	b.Log("estimated size in bytes of standard library implem: ", rtSize)
 	bmuSize := util.FormatSizeEstimation(util.Sizeof(custom))
 	b.Log("estimated size in bytes of Custom implem: ", bmuSize)
@@ -40,7 +43,7 @@ func BenchmarkIsSpace(b *testing.B) {
 	}
 }
 
-func isSpaceCustom() bmBTree {
+func isSpaceCustom() Bitmap {
 	// TODO
 	return NewBitmap([]rune{
 		9,
