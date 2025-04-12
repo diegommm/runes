@@ -1,6 +1,6 @@
 package runes
 
-const maxUint16 = 1<<16 - 1
+const MaxUint32 = 1<<32 - 1
 
 // Set is a set of runes.
 type Set interface {
@@ -8,24 +8,50 @@ type Set interface {
 	Contains(rune) bool
 }
 
+// MinMaxSet is a set with additional methods for internal optimizations.
+type MinMaxSet interface {
+	Set
+	Min() uint32 // MaxUint32 if Set is empty
+	Max() uint32 // MaxUint32 if Set is empty
+}
+
 // RuneT are the types with which runes of different width can be represented
 // without losing information.
 type RuneT interface {
-	uint8 | uint16 | rune
+	uint8 | uint16 | uint32 | rune
 }
 
-// Union is a [Set] that represents the union of its elements. Using a type
-// parameter is useful to create a compact set of the same type to further
-// reduce the memory footprint.
-type Union[T Set] []T
+// Union is a [Set] that represents the union of its elements. The first element
+// must have the smallest rune, and the last element the biggest.
+type Union[T MinMaxSet] []T
 
 func (x Union[T]) Contains(r rune) bool {
+	if len(x) == 0 { // || uint32(r) > x[len(x)-1].Max() {
+		return false
+	}
 	for i := range x {
 		if x[i].Contains(r) {
 			return true
 		}
+		//if uint32(r) < x[i].Min() {
+		//return false
+		//}
 	}
 	return false
+}
+
+func (x Union[T]) Min() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return x[0].Min()
+}
+
+func (x Union[T]) Max() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return x[len(x)-1].Max()
 }
 
 // LinearSlice is a [Set] that uses a linear search in its `Contains` method.
@@ -46,6 +72,20 @@ func (x LinearSlice[T]) containsSlow(r rune) bool {
 		}
 	}
 	return false
+}
+
+func (x LinearSlice[T]) Min() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return uint32(x[0])
+}
+
+func (x LinearSlice[T]) Max() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return uint32(x[len(x)-1])
 }
 
 // BinarySlice is a [Set] that uses a binary search in its `Contains` method.
@@ -74,6 +114,20 @@ func (x BinarySlice[T]) containsSlow(r rune) bool {
 	return false
 }
 
+func (x BinarySlice[T]) Min() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return uint32(x[0])
+}
+
+func (x BinarySlice[T]) Max() uint32 {
+	if len(x) == 0 {
+		return MaxUint32
+	}
+	return uint32(x[len(x)-1])
+}
+
 // Interval is the set of runes in the interval [From, To].
 type Interval[T RuneT] struct {
 	From, To T // `From` must be less than or equal to `To`
@@ -83,57 +137,66 @@ func (x Interval[T]) Contains(r rune) bool {
 	return r >= rune(x.From) && r <= rune(x.To)
 }
 
-// Uniform is a [Set] that contains `Count` runes uniformly distributed `Stride`
-// apart from each other, starting at `First`. For a `Stride` value of 1, a
-// `Interval` is slightly more compact and faster.
-type Uniform[F, S, C RuneT] struct {
-	First  F
-	Count  C // must be non-negative
-	Stride S // must be non-negative
+func (x Interval[T]) Min() uint32 {
+	return uint32(x.From)
 }
 
-func (x Uniform[F, S, C]) Contains(r rune) bool {
-	u, s, c := uint32(r-rune(x.First)), uint32(x.Stride), uint32(x.Count)
-	return s > 0 && u < s*c && u%s == 0
+func (x Interval[T]) Max() uint32 {
+	return uint32(x.To)
 }
 
-// OrderedRunesIter is a function that iterates over a list of runes in
-// ascending order, returning a rune and true while there are runes available.
-// When there are no more runes, it returns zero value and false indefinitely.
-type OrderedRunesIter = func() (rune, bool)
+// Uniform is a [Set] that contains the runes uniformly distributed `Stride`
+// apart from each other, starting at `First` and ending in `Hi`.
+type Uniform[T RuneT] struct {
+	Lo     T
+	Hi     T // must be >= Lo
+	Stride T // must be positive
+}
 
-// OrderedRunesList is a list of ordered runes.
-type OrderedRunesList interface {
-	Min() rune // zero value if list is empty, immutable
-	Max() rune // zero value if list is empty, immutable
-	Len() int  // number of items in the list, immutable
-	Iter() OrderedRunesIter
+func (x Uniform[T]) Contains(r rune) bool {
+	v, stride := uint32(r-rune(x.Lo)), uint32(x.Stride)
+	return v < uint32(x.Hi) && stride > 0 && v%stride == 0
+}
+
+func (x Uniform[T]) Min() uint32 {
+	return uint32(x.Lo)
+}
+
+func (x Uniform[T]) Max() uint32 {
+	return uint32(x.Hi)
 }
 
 // NewBitmap creates a [Bitmap] from the given runes, which must be sorted in
 // ascending order.
-func NewBitmap(ri OrderedRunesList) Bitmap {
-	if ri == nil || ri.Len() == 0 {
+func NewBitmap(rs []rune) Bitmap {
+	if len(rs) == 0 {
 		return ""
 	}
-	mn, mx := ri.Min(), ri.Max()
+	bm := make([]byte, bitmapLen(rs))
+	writeBitmapHeader(bm, rs)
+	writeBitmapBody(bm[bmHdrLen:], rs)
 
-	// allocate for the whole string
-	span := uint32(mx + 2 - mn)
-	bin := make([]byte, bmHdrLen+ceilDiv(span, 8))
+	return Bitmap(bm)
+}
 
-	// encode header
-	bmEncodeMinRune((*[bmHdrLen]byte)(bin), mn)
+func bitmapLen(rs []rune) uint32 {
+	return bmHdrLen + ceilDiv(uint32(rs[len(rs)-1]-rs[0]+1), 8)
+}
 
-	// build the bitmap
-	bm := bin[bmHdrLen:]
-	it := ri.Iter()
-	for r, ok := it(); ok; r, ok = it() {
-		u := uint32(r - mn)
-		bm[u>>3] |= 1 << (u & 7)
+func writeBitmapHeader(bm []byte, rs []rune) {
+	hdr := (*[bmHdrLen]byte)(bm)
+	hdr[0], hdr[1], hdr[2] = bmEncodeMinRune(rs[0])
+	hdr[2] &= lsb5 // ensure an incorrect min rune does not break encoding
+	// encode the highest 1 in the last byte corresponding to Max()
+	posOfHighestBitInLastByte := byte(uint32(rs[len(rs)-1]-rs[0]) & 7)
+	hdr[2] |= posOfHighestBitInLastByte << lsb5
+}
+
+func writeBitmapBody(bmBody []byte, rs []rune) {
+	for _, r := range rs {
+		u := uint32(r - rs[0])
+		bmBody[u>>3] |= 1 << (u & 7)
 	}
-
-	return Bitmap(bin)
 }
 
 // Bitmap is a general purpose [Set] that uses an internal bitmap for fast and
@@ -143,17 +206,44 @@ type Bitmap string
 // bmHdrLen is the length of the header of a Bitmap that contains the first
 // rune, encoded as 3 bytes in little-endian. Even the rune type being an int32,
 // utf8.MaxRune is only 3 bytes long, so a valid rune will never take more than
-// that.
+// that. The following is a way of seeing the header:
+//
+//	AAAAAAAA AAAAAAAA BBBAAAAA
+//
+// Where the 21 A bits are the little-endian representation of the first rune
+// (enough to represent utf8.MaxRune), and the 3 B bits are the position of the
+// bit representing the max rune within the last byte of the bitmap.
 const bmHdrLen = 3
 
+const lsb5 = 0b00011111
+
 func (x Bitmap) Contains(r rune) bool {
-	if len(x) <= bmHdrLen {
+	if len(x) < bmHdrLen {
 		return false
 	}
-	u := uint32(r - bmDecodeMinRune(x[0], x[1], x[2]))
-	i := bmHdrLen + int(u>>3)
-	// why having runtime.panicIndex is faster here???
-	return i < len(x) && 1<<(u&7)&x[i] != 0
+	u := uint32(r - bmDecodeMinRune(x[0], x[1], x[2]&lsb5))
+	i := bmHdrLen + u>>3
+	return int(i) < len(x) && 1<<(u&7)&x[i] != 0
+}
+
+func (x Bitmap) Min() uint32 {
+	if len(x) < bmHdrLen {
+		return MaxUint32
+	}
+	return uint32(bmDecodeMinRune(x[0], x[1], x[2]&lsb5))
+}
+
+func (x Bitmap) Max() uint32 {
+	switch {
+	case len(x) > bmHdrLen:
+		return uint32(bmDecodeMinRune(x[0], x[1], x[2]&lsb5)) +
+			uint32(len(x)<<3) +
+			uint32(x[2]>>lsb5)
+	case len(x) == bmHdrLen:
+		return uint32(bmDecodeMinRune(x[0], x[1], x[2]&lsb5))
+	default:
+		return MaxUint32
+	}
 }
 
 // ceilDiv performs the integer division of two uint32, rounding to the next
@@ -168,10 +258,8 @@ func u32Mid(a, b uint32) uint32 {
 }
 
 // bmEncodeMinRune encodes a rune in bmHdrLen bytes with little-endian.
-func bmEncodeMinRune(b *[bmHdrLen]byte, r rune) {
-	b[0] = byte(r)
-	b[1] = byte(r >> 8)
-	b[2] = byte(r >> 16)
+func bmEncodeMinRune(r rune) (b0, b1, b2 byte) {
+	return byte(r), byte(r >> 8), byte(r >> 16)
 }
 
 // bmDecodeMinRune decodes a rune encoded with bmEncodeMinRune.

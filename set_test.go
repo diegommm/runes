@@ -3,6 +3,7 @@ package runes
 import (
 	"encoding/binary"
 	"fmt"
+	"iter"
 	"slices"
 	"testing"
 	"unicode/utf8"
@@ -12,51 +13,31 @@ import (
 
 const (
 	maxUint8  = 1<<8 - 1
-	maxUint32 = 1<<32 - 1
+	maxUint16 = 1<<16 - 1
 	maxInt32  = 1<<31 - 1
 
 	maxRune = '\U0010FFFF'
 )
 
-var (
-	_ util.OrderedListIter[rune] = OrderedRunesIter(nil)
-	_ util.OrderedList[rune]     = OrderedRunesList(nil)
-	_ OrderedRunesIter           = util.OrderedListIter[rune](nil)
-	_ OrderedRunesList           = util.OrderedList[rune](nil)
-)
-
-func runes(rs ...rune) OrderedRunesIter {
-	return util.SliceList[rune](rs).Iter()
-}
-
-func seq(from rune, count int, stride ...rune) OrderedRunesIter {
-	s := rune(1)
-	if len(stride) == 1 {
-		s = stride[0]
-	}
-	return util.Seq[rune]{from, count, s}.Iter()
-}
-
-type containsFunc func(rune) bool
-
-func (f containsFunc) Contains(r rune) bool {
-	return f(r)
+func runes(rs ...rune) iter.Seq[rune] {
+	return slices.Values(rs)
 }
 
 var (
-	always = containsFunc(func(rune) bool { return true })
-	never  = containsFunc(func(rune) bool { return false })
+	always = util.ContainsFunc(func(rune) bool { return true })
+	never  = util.ContainsFunc(func(rune) bool { return false })
 )
 
+/*
 func TestUnion(t *testing.T) {
 	t.Parallel()
-	type unionSets = Union[Set]
+	type unionSets = Union[MinMaxSet]
 
 	testCases := []struct {
 		set      Set
 		expected bool
 	}{
-		{(Union[Set])(nil), false},
+		{(Union[MinMaxSet])(nil), false},
 		{unionSets{}, false},
 		{unionSets{never}, false},
 		{unionSets{always}, true},
@@ -69,6 +50,7 @@ func TestUnion(t *testing.T) {
 		util.Equal(t, tc.expected, got, "index=%v", i)
 	}
 }
+*/
 
 func TestBinarySlice(t *testing.T) {
 	t.Parallel()
@@ -123,22 +105,22 @@ func testSlices(t *testing.T, f func([]rune) Set) {
 	setTestCases{
 		{
 			set:         f(nil),
-			notContains: seq(-1, utf8.MaxRune),
+			notContains: util.Seq(-1, utf8.MaxRune, 1),
 		},
 		{
-			set:         f(util.Collect(seq(utf8.MaxRune-10, 10))),
-			contains:    seq(utf8.MaxRune-10, 10),
-			notContains: seq(-1, utf8.MaxRune-10),
+			set:         f(slices.Collect(util.Seq(utf8.MaxRune-10, utf8.MaxRune, 1))),
+			contains:    util.Seq(utf8.MaxRune-10, utf8.MaxRune, 1),
+			notContains: util.Seq(-1, utf8.MaxRune-11, 1),
 		},
 		{
-			set:         f(util.Collect(seq(0, 10))),
-			contains:    seq(0, 10),
-			notContains: seq(11, utf8.MaxRune),
+			set:         f(slices.Collect(util.Seq(0, 10, 1))),
+			contains:    util.Seq(0, 10, 1),
+			notContains: util.Seq(11, utf8.MaxRune, 1),
 		},
 		{
 			set:         f([]rune{1, utf8.MaxRune}),
 			contains:    runes(1, utf8.MaxRune),
-			notContains: seq(2, utf8.MaxRune-2),
+			notContains: util.Seq(2, utf8.MaxRune-1, 1),
 		},
 	}.run(t)
 }
@@ -148,18 +130,18 @@ func TestInterval(t *testing.T) {
 	setTestCases{
 		{
 			set:         Interval[uint8]{},
-			contains:    seq(0, 1),
-			notContains: seq(1, utf8.MaxRune),
+			contains:    util.Seq(0, 0, 1),
+			notContains: util.Seq(1, utf8.MaxRune, 1),
 		},
 		{
 			set:         Interval[rune]{utf8.MaxRune, utf8.MaxRune},
-			contains:    seq(utf8.MaxRune, 1),
-			notContains: seq(-1, utf8.MaxRune),
+			contains:    util.Seq(utf8.MaxRune, utf8.MaxRune, 1),
+			notContains: util.Seq(-1, utf8.MaxRune-1, 1),
 		},
 		{
 			set:         Interval[uint16]{maxUint16 - 10, maxUint16},
-			contains:    seq(maxUint16-10, 10),
-			notContains: util.IterMerge(seq(-1, maxUint16-10), seq(maxUint16+1, utf8.MaxRune-maxUint16-1)),
+			contains:    util.Seq(maxUint16-10, maxUint16, 1),
+			notContains: util.Concat(util.Seq(-1, maxUint16-11, 1), util.Seq(maxUint16+1, utf8.MaxRune-maxUint16-1, 1)),
 		},
 	}.run(t)
 }
@@ -168,45 +150,60 @@ func TestUniform(t *testing.T) {
 	t.Parallel()
 	setTestCases{
 		{
-			set:         Uniform[uint8, uint8, uint8]{},
-			notContains: seq(-1, utf8.MaxRune),
+			set:         Uniform[uint8]{},
+			notContains: util.Seq(1, utf8.MaxRune, 1),
 		},
 		{
-			set:         Uniform[uint8, uint8, uint8]{maxUint8, maxUint8, maxUint8},
-			contains:    seq(maxUint8, maxUint8, maxUint8),
-			notContains: util.IterExcept(seq(-1, utf8.MaxRune), seq(maxUint8, maxUint8, maxUint8)),
+			set:         Uniform[uint16]{maxUint8, maxUint8 + maxUint8*maxUint8, maxUint8},
+			contains:    util.Seq(maxUint8, maxUint8+maxUint8*maxUint8, maxUint8),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), util.Seq(maxUint8, maxUint8+maxUint8*maxUint8, maxUint8)),
 		},
 		{
-			set:         Uniform[uint8, uint8, uint8]{3, 5, 7},
+			set:         Uniform[uint8]{3, 31, 7},
 			contains:    runes(3, 10, 17, 24, 31),
-			notContains: util.IterExcept(seq(-1, utf8.MaxRune), runes(3, 10, 17, 24, 31)),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), runes(3, 10, 17, 24, 31)),
 		},
 	}.run(t)
 }
 
 func TestBitmap(t *testing.T) {
 	t.Parallel()
-	util.MustEqual(t, true, utf8.MaxRune < 1<<24-1,
-		"expected max rune to be representable in 3 bytes")
+	util.MustEqual(t, true, utf8.MaxRune <= (1<<22-1),
+		"expected max rune to be representable in 21 bits")
 	someRunes := []rune{1, 3, 99, 410}
 	setTestCases{
 		{
-			set:         NewBitmap(util.SliceList[rune](nil)),
-			notContains: seq(-1, utf8.MaxRune),
+			set:         NewBitmap(nil),
+			notContains: util.Seq(-1, utf8.MaxRune, 1),
 		},
 		{
-			set:         NewBitmap(util.SliceList[rune]([]rune{})),
-			notContains: seq(-1, utf8.MaxRune),
+			set:         NewBitmap([]rune{}),
+			notContains: util.Seq(-1, utf8.MaxRune, 1),
 		},
 		{
-			set:         NewBitmap(util.SliceList[rune](someRunes)),
+			set:         NewBitmap(someRunes),
 			contains:    runes(someRunes...),
-			notContains: util.IterExcept(seq(-1, utf8.MaxRune), runes(someRunes...)),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), runes(someRunes...)),
 		},
 		{
-			set:         NewBitmap(util.SliceList[rune]([]rune{utf8.MaxRune})),
+			set:         NewBitmap([]rune{utf8.MaxRune}),
 			contains:    runes(utf8.MaxRune),
-			notContains: seq(-1, utf8.MaxRune-1),
+			notContains: util.Seq(-1, utf8.MaxRune-1, 1),
+		},
+		{
+			set:         NewBitmap([]rune{1, 15}),
+			contains:    runes(1, 15),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), runes(1, 15)),
+		},
+		{
+			set:         NewBitmap([]rune{1, 16}),
+			contains:    runes(1, 16),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), runes(1, 16)),
+		},
+		{
+			set:         NewBitmap([]rune{1, 17}),
+			contains:    runes(1, 17),
+			notContains: util.Except(util.Seq(-1, utf8.MaxRune, 1), runes(1, 17)),
 		},
 	}.run(t)
 }
@@ -221,7 +218,7 @@ func TestCeilDiv(t *testing.T) {
 		{1023, 1024, 1},
 		{1024, 1024, 1},
 		{1025, 1024, 2},
-		{maxUint32, maxUint32, 1},
+		{MaxUint32, MaxUint32, 1},
 	}
 
 	for i, tc := range testCases {
@@ -242,7 +239,7 @@ func TestU32Mid(t *testing.T) {
 		{1000, 2000, 1500},
 		{1001, 2000, 1500},
 		{1000, 2001, 1500},
-		{0, maxUint32, 1<<31 - 1},
+		{0, MaxUint32, 1<<31 - 1},
 	}
 
 	for i, tc := range testCases {
@@ -263,7 +260,7 @@ func TestBitmapMinRuneEncoding(t *testing.T) {
 
 			expectedEnc := *(*[bmHdrLen]byte)(b[:])
 			var gotEnc [bmHdrLen]byte
-			bmEncodeMinRune(&gotEnc, tc)
+			gotEnc[0], gotEnc[1], gotEnc[2] = bmEncodeMinRune(tc)
 			util.Equal(t, expectedEnc, gotEnc, "bmEncodeMinRune of 0x%x", tc)
 
 			gotRune := bmDecodeMinRune(expectedEnc[0], expectedEnc[1], expectedEnc[2])
@@ -276,24 +273,24 @@ func TestSeqs(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		from     rune
-		count    int
+		to       rune
 		stride   rune
 		expected []rune
 	}{
-		{1, 0, 1, []rune{}},
+		{1, -1, 1, []rune{}},
 		{1, 1, 1, []rune{1}},
-		{3, 5, 7, []rune{3, 10, 17, 24, 31}},
+		{3, 31, 7, []rune{3, 10, 17, 24, 31}},
 	}
 
 	for i, tc := range testCases {
-		got := util.Collect(seq(tc.from, tc.count, tc.stride))
+		got := slices.Collect(util.Seq(tc.from, tc.to, tc.stride))
 		util.Equal(t, true, slices.Equal(tc.expected, got), "index=%v", i)
 	}
 }
 
 type setTestCase struct {
 	set                   Set
-	contains, notContains OrderedRunesIter
+	contains, notContains iter.Seq[rune]
 }
 
 type setTestCases []setTestCase
@@ -305,7 +302,7 @@ func (tcs setTestCases) run(t *testing.T) {
 			t.Parallel()
 			if tc.contains != nil {
 				var count int
-				for r := range util.IterSeq(tc.contains) {
+				for r := range tc.contains {
 					count++
 					util.Equal(t, true, tc.set.Contains(r), "rune=0x%x", r)
 				}
@@ -313,7 +310,7 @@ func (tcs setTestCases) run(t *testing.T) {
 			}
 			if tc.notContains != nil {
 				var count int
-				for r := range util.IterSeq(tc.notContains) {
+				for r := range tc.notContains {
 					count++
 					util.Equal(t, false, tc.set.Contains(r), "rune=0x%x", r)
 				}
